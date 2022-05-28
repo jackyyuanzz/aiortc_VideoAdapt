@@ -6,9 +6,10 @@ import random
 import threading
 import time
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set
 
 from av.frame import Frame
+import time
 
 from . import clock
 from .codecs import depayload, get_capabilities, get_decoder, is_rtx
@@ -16,6 +17,7 @@ from .exceptions import InvalidStateError
 from .jitterbuffer import JitterBuffer
 from .mediastreams import MediaStreamError, MediaStreamTrack
 from .rate import RemoteBitrateEstimator
+from .rate_mod import RemoteBitrateEstimator_mod
 from .rtcdtlstransport import RTCDtlsTransport
 from .rtcrtpparameters import (
     RTCRtpCapabilities,
@@ -26,7 +28,6 @@ from .rtp import (
     RTCP_PSFB_APP,
     RTCP_PSFB_PLI,
     RTCP_RTPFB_NACK,
-    RTP_HISTORY_SIZE,
     AnyRtcpPacket,
     RtcpByePacket,
     RtcpPsfbPacket,
@@ -79,9 +80,6 @@ class NackGenerator:
         self.missing: Set[int] = set()
 
     def add(self, packet: RtpPacket) -> bool:
-        """
-        Mark a new packet as received, and deduce missing packets.
-        """
         missed = False
 
         if self.max_seq is None:
@@ -99,22 +97,7 @@ class NackGenerator:
         else:
             self.missing.discard(packet.sequence_number)
 
-        # limit number of tracked packets
-        self.truncate()
-
         return missed
-
-    def truncate(self) -> None:
-        """
-        Limit the number of missing packets we track.
-
-        Otherwise, the size of RTCP FB messages grows indefinitely.
-        """
-        if self.max_seq is not None:
-            min_seq = uint16_add(self.max_seq, -RTP_HISTORY_SIZE)
-            for seq in list(self.missing):
-                if uint16_gt(min_seq, seq):
-                    self.missing.discard(seq)
 
 
 class StreamStatistics:
@@ -276,9 +259,9 @@ class RTCRtpReceiver:
             self.__jitter_buffer = JitterBuffer(capacity=128, is_video=True)
             self.__nack_generator = NackGenerator()
             self.__remote_bitrate_estimator = RemoteBitrateEstimator()
+            self.__remote_bitrate_estimator = RemoteBitrateEstimator_mod()
         self._track: Optional[RemoteStreamTrack] = None
         self.__rtcp_exited = asyncio.Event()
-        self.__rtcp_started = asyncio.Event()
         self.__rtcp_task: Optional[asyncio.Future[None]] = None
         self.__rtx_ssrc: Dict[int, int] = {}
         self.__started = False
@@ -291,13 +274,6 @@ class RTCRtpReceiver:
         self.__lsr_time: Dict[int, float] = {}
         self.__remote_streams: Dict[int, StreamStatistics] = {}
         self.__rtcp_ssrc: Optional[int] = None
-
-        # logging
-        self.__log_debug: Callable[..., None] = lambda *args: None
-        if logger.isEnabledFor(logging.DEBUG):
-            self.__log_debug = lambda msg, *args: logger.debug(
-                f"RTCRtpReceiver(%s) {msg}", self.__kind, *args
-            )
 
     @property
     def track(self) -> MediaStreamTrack:
@@ -405,9 +381,6 @@ class RTCRtpReceiver:
         if self.__started:
             self.__transport._unregister_rtp_receiver(self)
             self.__stop_decoder()
-
-            # shutdown RTCP task
-            await self.__rtcp_started.wait()
             self.__rtcp_task.cancel()
             await self.__rtcp_exited.wait()
 
@@ -453,19 +426,33 @@ class RTCRtpReceiver:
         # feed bitrate estimator
         if self.__remote_bitrate_estimator is not None:
             if packet.extensions.abs_send_time is not None:
-                remb = self.__remote_bitrate_estimator.add(
+                # self.__remote_bitrate_estimator.add(
+                #     abs_send_time=packet.extensions.abs_send_time,
+                #     arrival_time_ms=arrival_time_ms,
+                #     payload_size=len(packet.payload) + packet.padding_size,
+                #     ssrc=packet.ssrc, timestamp = packet.timestamp
+                # )
+                self.__remote_bitrate_estimator.add(
                     abs_send_time=packet.extensions.abs_send_time,
                     arrival_time_ms=arrival_time_ms,
                     payload_size=len(packet.payload) + packet.padding_size,
-                    ssrc=packet.ssrc,
+                    ssrc=packet.ssrc, timestamp = packet.timestamp, arrival_time_measured = time.time()*1000
                 )
+                bitrate, ssrcs = self.__remote_bitrate_estimator.update(arrival_time_ms, arrival_time_measured = time.time()*1000)
+                print('Measured Bitrate: {}'.format(bitrate))
+                remb = True
+                if remb != None:
+                    time_now = time.time()
+                    f = open("bitrate_record_1.0Mbps.txt", "a")
+                    f.write("{},{:.4f},{},{}\n".format(packet.timestamp,time_now,bitrate,len(packet.payload)))
+                    f.close()
                 if self.__rtcp_ssrc is not None and remb is not None:
                     # send Receiver Estimated Maximum Bitrate feedback
                     rtcp_packet = RtcpPsfbPacket(
                         fmt=RTCP_PSFB_APP,
                         ssrc=self.__rtcp_ssrc,
                         media_ssrc=0,
-                        fci=pack_remb_fci(*remb),
+                        fci=pack_remb_fci(bitrate, ssrcs),
                     )
                     await self._send_rtcp(rtcp_packet)
 
@@ -531,7 +518,6 @@ class RTCRtpReceiver:
 
     async def _run_rtcp(self) -> None:
         self.__log_debug("- RTCP started")
-        self.__rtcp_started.set()
 
         try:
             while True:
@@ -579,7 +565,7 @@ class RTCRtpReceiver:
         except ConnectionError:
             pass
 
-    async def _send_rtcp_nack(self, media_ssrc: int, lost: List[int]) -> None:
+    async def _send_rtcp_nack(self, media_ssrc: int, lost) -> None:
         """
         Send an RTCP packet to report missing RTP packets.
         """
@@ -611,3 +597,6 @@ class RTCRtpReceiver:
             self.__decoder_queue.put(None)
             self.__decoder_thread.join()
             self.__decoder_thread = None
+
+    def __log_debug(self, msg: str, *args) -> None:
+        logger.debug(f"RTCRtpReceiver(%s) {msg}", self.__kind, *args)

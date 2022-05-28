@@ -1,9 +1,4 @@
-import fractions
-import math
-import sys
 from unittest import TestCase
-
-from av import AudioFrame
 
 from aiortc import rtp
 from aiortc.rtcrtpparameters import RTCRtpHeaderExtensionParameters, RTCRtpParameters
@@ -30,20 +25,6 @@ from aiortc.rtp import (
 from .utils import load
 
 
-def create_audio_frame(sample_func, samples, pts, layout="mono", sample_rate=48000):
-    frame = AudioFrame(format="s16", layout=layout, samples=samples)
-    for p in frame.planes:
-        buf = bytearray()
-        for i in range(samples):
-            sample = int(sample_func(i) * 32767)
-            buf.extend(int.to_bytes(sample, 2, sys.byteorder, signed=True))
-        p.update(buf)
-    frame.pts = pts
-    frame.sample_rate = sample_rate
-    frame.time_base = fractions.Fraction(1, sample_rate)
-    return frame
-
-
 class RtcpPacketTest(TestCase):
     def test_bye(self):
         data = load("rtcp_bye.bin")
@@ -51,7 +32,7 @@ class RtcpPacketTest(TestCase):
         self.assertEqual(len(packets), 1)
 
         packet = packets[0]
-        self.assertIsInstance(packet, RtcpByePacket)
+        self.assertTrue(isinstance(packet, RtcpByePacket))
         self.assertEqual(packet.sources, [2924645187])
         self.assertEqual(bytes(packet), data)
 
@@ -70,7 +51,7 @@ class RtcpPacketTest(TestCase):
         self.assertEqual(len(packets), 1)
 
         packet = packets[0]
-        self.assertIsInstance(packet, RtcpByePacket)
+        self.assertTrue(isinstance(packet, RtcpByePacket))
         self.assertEqual(packet.sources, [])
         self.assertEqual(bytes(packet), data)
 
@@ -82,7 +63,7 @@ class RtcpPacketTest(TestCase):
         self.assertEqual(len(packets), 1)
 
         packet = packets[0]
-        self.assertIsInstance(packet, RtcpByePacket)
+        self.assertTrue(isinstance(packet, RtcpByePacket))
         self.assertEqual(packet.sources, [])
         self.assertEqual(bytes(packet), b"\x80\xcb\x00\x00")
 
@@ -110,7 +91,7 @@ class RtcpPacketTest(TestCase):
         self.assertEqual(len(packets), 1)
 
         packet = packets[0]
-        self.assertIsInstance(packet, RtcpPsfbPacket)
+        self.assertTrue(isinstance(packet, RtcpPsfbPacket))
         self.assertEqual(packet.fmt, 1)
         self.assertEqual(packet.ssrc, 1414554213)
         self.assertEqual(packet.media_ssrc, 587284409)
@@ -123,7 +104,7 @@ class RtcpPacketTest(TestCase):
         self.assertEqual(len(packets), 1)
 
         packet = packets[0]
-        self.assertIsInstance(packet, RtcpRrPacket)
+        self.assertTrue(isinstance(packet, RtcpRrPacket))
         self.assertEqual(packet.ssrc, 817267719)
         self.assertEqual(packet.reports[0].ssrc, 1200895919)
         self.assertEqual(packet.reports[0].fraction_lost, 0)
@@ -162,7 +143,7 @@ class RtcpPacketTest(TestCase):
         self.assertEqual(len(packets), 1)
 
         packet = packets[0]
-        self.assertIsInstance(packet, RtcpSdesPacket)
+        self.assertTrue(isinstance(packet, RtcpSdesPacket))
         self.assertEqual(packet.chunks[0].ssrc, 1831097322)
         self.assertEqual(
             packet.chunks[0].items, [(1, b"{63f459ea-41fe-4474-9d33-9707c9ee79d1}")]
@@ -189,7 +170,7 @@ class RtcpPacketTest(TestCase):
         self.assertEqual(len(packets), 1)
 
         packet = packets[0]
-        self.assertIsInstance(packet, RtcpSrPacket)
+        self.assertTrue(isinstance(packet, RtcpSrPacket))
         self.assertEqual(packet.ssrc, 1831097322)
         self.assertEqual(packet.sender_info.ntp_timestamp, 16016567581311369308)
         self.assertEqual(packet.sender_info.rtp_timestamp, 1722342718)
@@ -218,7 +199,7 @@ class RtcpPacketTest(TestCase):
         self.assertEqual(len(packets), 1)
 
         packet = packets[0]
-        self.assertIsInstance(packet, RtcpRtpfbPacket)
+        self.assertTrue(isinstance(packet, RtcpRtpfbPacket))
         self.assertEqual(packet.fmt, 1)
         self.assertEqual(packet.ssrc, 2336520123)
         self.assertEqual(packet.media_ssrc, 4145934052)
@@ -240,8 +221,8 @@ class RtcpPacketTest(TestCase):
 
         packets = RtcpPacket.parse(data)
         self.assertEqual(len(packets), 2)
-        self.assertIsInstance(packets[0], RtcpSrPacket)
-        self.assertIsInstance(packets[1], RtcpSdesPacket)
+        self.assertTrue(isinstance(packets[0], RtcpSrPacket))
+        self.assertTrue(isinstance(packets[1], RtcpSdesPacket))
 
     def test_bad_version(self):
         data = b"\xc0" + load("rtcp_rr.bin")[1:]
@@ -685,19 +666,3 @@ class RtpUtilTest(TestCase):
         self.assertEqual(recovered.csrc, packet.csrc)
         self.assertEqual(recovered.extensions, packet.extensions)
         self.assertEqual(recovered.payload, packet.payload)
-
-    def test_compute_audio_level_dbov(self):
-        num_samples = 960  # 20ms @ 48kHz
-        # test a frame of all zeroes (-127 dBov, the minimum value)
-        silent_frame = create_audio_frame(lambda n: 0.0, num_samples, 0)
-        self.assertEqual(rtp.compute_audio_level_dbov(silent_frame), -127)
-        # test a 50Hz square wave (0 dBov, the maximum value)
-        square_frame = create_audio_frame(
-            lambda n: 1.0 if n < num_samples / 2 else -1.0, num_samples, 0
-        )
-        self.assertEqual(rtp.compute_audio_level_dbov(square_frame), 0)
-        # test a 50Hz sine wave (-3 dBov, the maximum value for a sine wave)
-        sine_frame = create_audio_frame(
-            lambda n: math.sin(2 * math.pi * n / num_samples), num_samples, 0
-        )
-        self.assertEqual(rtp.compute_audio_level_dbov(sine_frame), -3)

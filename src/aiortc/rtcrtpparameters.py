@@ -1,7 +1,6 @@
+from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Union
-
-ParametersDict = Dict[str, Union[int, str, None]]
+from typing import List, Optional
 
 
 @dataclass
@@ -17,7 +16,7 @@ class RTCRtpCodecCapability:
     "The codec clock rate expressed in Hertz."
     channels: Optional[int] = None
     "The number of channels supported (e.g. two for stereo)."
-    parameters: ParametersDict = field(default_factory=dict)
+    parameters: OrderedDict = field(default_factory=OrderedDict)
     "Codec-specific parameters available for signaling."
 
     @property
@@ -42,7 +41,7 @@ class RTCRtpCodecParameters:
     "The value that goes in the RTP Payload Type Field."
     rtcpFeedback: List["RTCRtcpFeedback"] = field(default_factory=list)
     "Transport layer and codec-specific feedback messages for this codec."
-    parameters: ParametersDict = field(default_factory=dict)
+    parameters: OrderedDict = field(default_factory=OrderedDict)
     "Codec-specific parameters available for signaling."
 
     @property

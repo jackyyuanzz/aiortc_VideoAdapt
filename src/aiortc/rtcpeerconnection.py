@@ -2,9 +2,10 @@ import asyncio
 import copy
 import logging
 import uuid
+from collections import OrderedDict
 from typing import Dict, List, Optional, Set, Union
 
-from pyee.asyncio import AsyncIOEventEmitter
+from pyee import AsyncIOEventEmitter
 
 from . import clock, rtp, sdp
 from .codecs import CODECS, HEADER_EXTENSIONS, is_rtx
@@ -96,7 +97,19 @@ def find_common_codecs(
 
         # handle other codecs
         for codec in local_codecs:
-            if is_codec_compatible(codec, c):
+            if (
+                codec.mimeType.lower() == c.mimeType.lower()
+                and codec.clockRate == c.clockRate
+            ):
+                if codec.mimeType.lower() == "video/h264":
+                    # FIXME: check according to RFC 6184
+                    parameters_compatible = True
+                    for param in ["packetization-mode", "profile-level-id"]:
+                        if c.parameters.get(param) != codec.parameters.get(param):
+                            parameters_compatible = False
+                    if not parameters_compatible:
+                        continue
+
                 codec = copy.deepcopy(codec)
                 if c.payloadType in rtp.DYNAMIC_PAYLOAD_TYPES:
                     codec.payloadType = c.payloadType
@@ -119,31 +132,6 @@ def find_common_header_extensions(
             if lx.uri == rx.uri:
                 common.append(rx)
     return common
-
-
-def is_codec_compatible(a: RTCRtpCodecParameters, b: RTCRtpCodecParameters) -> bool:
-    if a.mimeType.lower() != b.mimeType.lower() or a.clockRate != b.clockRate:
-        return False
-
-    if a.mimeType.lower() == "video/h264":
-
-        def packetization(c: RTCRtpCodecParameters):
-            return c.parameters.get("packetization-mode", "0")
-
-        def profile(c: RTCRtpCodecParameters):
-            # for backwards compatibility with older versions of WebRTC,
-            # consider the absence of a profile-level-id parameter to mean
-            # "constrained baseline level 3.1"
-            return sdp.parse_h264_profile_level_id(
-                c.parameters.get("profile-level-id", "42E01F")
-            )[0]
-
-        try:
-            return packetization(a) == packetization(b) and profile(a) == profile(b)
-        except ValueError:
-            return False
-
-    return True
 
 
 def add_transport_description(
@@ -737,12 +725,6 @@ class RTCPeerConnection(AsyncIOEventEmitter):
         :param sessionDescription: An :class:`RTCSessionDescription` generated
                                     by :meth:`createOffer` or :meth:`createAnswer()`.
         """
-        self.__log_debug(
-            "setLocalDescription(%s)\n%s",
-            sessionDescription.type,
-            sessionDescription.sdp,
-        )
-
         # parse and validate description
         description = sdp.SessionDescription.parse(sessionDescription.sdp)
         description.type = sessionDescription.type
@@ -813,12 +795,6 @@ class RTCPeerConnection(AsyncIOEventEmitter):
         :param sessionDescription: An :class:`RTCSessionDescription` created from
                                     information received over the signaling channel.
         """
-        self.__log_debug(
-            "setRemoteDescription(%s)\n%s",
-            sessionDescription.type,
-            sessionDescription.sdp,
-        )
-
         # parse and validate description
         description = sdp.SessionDescription.parse(sessionDescription.sdp)
         description.type = sessionDescription.type
@@ -1128,7 +1104,7 @@ class RTCPeerConnection(AsyncIOEventEmitter):
             rtcp=media.rtp.rtcp,
         )
         if len(media.ssrc):
-            encodings: Dict[int, RTCRtpDecodingParameters] = {}
+            encodings: OrderedDict[int, RTCRtpDecodingParameters] = OrderedDict()
             for codec in transceiver._codecs:
                 if is_rtx(codec):
                     if codec.parameters["apt"] in encodings and len(media.ssrc) == 2:

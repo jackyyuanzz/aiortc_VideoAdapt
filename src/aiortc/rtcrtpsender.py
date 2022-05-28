@@ -4,10 +4,8 @@ import random
 import time
 import traceback
 import uuid
-from typing import Callable, Dict, List, Optional, Union
-
-from av import AudioFrame
-from av.frame import Frame
+from typing import Dict, List, Optional, Union
+import numpy as np
 
 from . import clock, rtp
 from .codecs import get_capabilities, get_encoder, is_rtx
@@ -19,7 +17,6 @@ from .rtp import (
     RTCP_PSFB_APP,
     RTCP_PSFB_PLI,
     RTCP_RTPFB_NACK,
-    RTP_HISTORY_SIZE,
     AnyRtcpPacket,
     RtcpByePacket,
     RtcpPsfbPacket,
@@ -42,14 +39,8 @@ from .utils import random16, random32, uint16_add, uint32_add
 
 logger = logging.getLogger(__name__)
 
+RTP_HISTORY_SIZE = 128
 RTT_ALPHA = 0.85
-
-
-class RTCEncodedFrame:
-    def __init__(self, payloads: List[bytes], timestamp: int, audio_level: int):
-        self.payloads = payloads
-        self.timestamp = timestamp
-        self.audio_level = audio_level
 
 
 class RTCRtpSender:
@@ -64,6 +55,7 @@ class RTCRtpSender:
     """
 
     def __init__(self, trackOrKind: Union[MediaStreamTrack, str], transport) -> None:
+        
         if transport.state == "closed":
             raise InvalidStateError
 
@@ -84,11 +76,9 @@ class RTCRtpSender:
         self.__mid: Optional[str] = None
         self.__rtp_exited = asyncio.Event()
         self.__rtp_header_extensions_map = rtp.HeaderExtensionsMap()
-        self.__rtp_started = asyncio.Event()
         self.__rtp_task: Optional[asyncio.Future[None]] = None
         self.__rtp_history: Dict[int, RtpPacket] = {}
         self.__rtcp_exited = asyncio.Event()
-        self.__rtcp_started = asyncio.Event()
         self.__rtcp_task: Optional[asyncio.Future[None]] = None
         self.__rtx_payload_type: Optional[int] = None
         self.__rtx_sequence_number = random16()
@@ -105,12 +95,7 @@ class RTCRtpSender:
         self.__packet_count = 0
         self.__rtt = None
 
-        # logging
-        self.__log_debug: Callable[..., None] = lambda *args: None
-        if logger.isEnabledFor(logging.DEBUG):
-            self.__log_debug = lambda msg, *args: logger.debug(
-                f"RTCRtpSender(%s) {msg}", self.__kind, *args
-            )
+        self.switch_count = 0
 
     @property
     def kind(self):
@@ -211,9 +196,6 @@ class RTCRtpSender:
         """
         if self.__started:
             self.__transport._unregister_rtp_sender(self)
-
-            # shutdown RTP and RTCP tasks
-            await asyncio.gather(self.__rtp_started.wait(), self.__rtcp_started.wait())
             self.__rtp_task.cancel()
             self.__rtcp_task.cancel()
             await asyncio.gather(self.__rtp_exited.wait(), self.__rtcp_exited.wait())
@@ -256,37 +238,51 @@ class RTCRtpSender:
         elif isinstance(packet, RtcpPsfbPacket) and packet.fmt == RTCP_PSFB_APP:
             try:
                 bitrate, ssrcs = unpack_remb_fci(packet.fci)
+                bitrate_kbps = bitrate//(10**3)
                 if self._ssrc in ssrcs:
                     self.__log_debug(
                         "- receiver estimated maximum bitrate %d bps", bitrate
                     )
                     if self.__encoder and hasattr(self.__encoder, "target_bitrate"):
-                        self.__encoder.target_bitrate = bitrate
+                        pass
+                        # print('set_target_bitrate')
+                        # self.__encoder.target_bitrate = bitrate
+                        # print('Outside: {}'.format(self.__encoder.target_bitrate))
+                        # Resolutions = [(672,376), (1280,720), (1920//4,1080//4)]
+                        # if bitrate_kbps < 1000:
+                        #     choice = 0
+                        #     self.__encoder.resolution_mode = 0
+                        # elif bitrate_kbps < 3000:
+                        #     choice = 1
+                        #     self.__encoder.resolution_mode = 1
+                        # else:
+                        #     choice = 2
+                        #     self.__encoder.resolution_mode = 2
+                        # size = Resolutions[choice]
+                        # self.__encoder.width = size[0]
+                        # self.__encoder.height = size[1]
+                        # if self.switch_count%20 == 0:
+                        #     choice = np.random.choice([0,1])
+                        #     size = Resolutions[choice]
+                        #     self.__encoder.width = size[0]
+                        #     self.__encoder.height = size[1]
+                        # self.switch_count += 1
+
             except ValueError:
                 pass
 
     async def _next_encoded_frame(self, codec: RTCRtpCodecParameters):
-        # get [Frame|Packet]
-        data = await self.__track.recv()
-        audio_level = None
+        # get frame
+        frame = await self.__track.recv()
 
+        # encode frame
         if self.__encoder is None:
             self.__encoder = get_encoder(codec)
-
-        if isinstance(data, Frame):
-            # encode frame
-            if isinstance(data, AudioFrame):
-                audio_level = rtp.compute_audio_level_dbov(data)
-
-            force_keyframe = self.__force_keyframe
-            self.__force_keyframe = False
-            payloads, timestamp = await self.__loop.run_in_executor(
-                None, self.__encoder.encode, data, force_keyframe
-            )
-        else:
-            payloads, timestamp = self.__encoder.pack(data)
-
-        return RTCEncodedFrame(payloads, timestamp, audio_level)
+        force_keyframe = self.__force_keyframe
+        self.__force_keyframe = False
+        return await self.__loop.run_in_executor(
+            None, self.__encoder.encode, frame, force_keyframe
+        )
 
     async def _retransmit(self, sequence_number: int) -> None:
         """
@@ -315,7 +311,6 @@ class RTCRtpSender:
 
     async def _run_rtp(self, codec: RTCRtpCodecParameters) -> None:
         self.__log_debug("- RTP started")
-        self.__rtp_started.set()
 
         sequence_number = random16()
         timestamp_origin = random32()
@@ -325,10 +320,10 @@ class RTCRtpSender:
                     await asyncio.sleep(0.02)
                     continue
 
-                enc_frame = await self._next_encoded_frame(codec)
-                timestamp = uint32_add(timestamp_origin, enc_frame.timestamp)
+                payloads, timestamp = await self._next_encoded_frame(codec)
+                timestamp = uint32_add(timestamp_origin, timestamp)
 
-                for i, payload in enumerate(enc_frame.payloads):
+                for i, payload in enumerate(payloads):
                     packet = RtpPacket(
                         payload_type=codec.payloadType,
                         sequence_number=sequence_number,
@@ -336,15 +331,13 @@ class RTCRtpSender:
                     )
                     packet.ssrc = self._ssrc
                     packet.payload = payload
-                    packet.marker = (i == len(enc_frame.payloads) - 1) and 1 or 0
+                    packet.marker = (i == len(payloads) - 1) and 1 or 0
 
                     # set header extensions
                     packet.extensions.abs_send_time = (
                         clock.current_ntp_time() >> 14
                     ) & 0x00FFFFFF
                     packet.extensions.mid = self.__mid
-                    if enc_frame.audio_level is not None:
-                        packet.extensions.audio_level = (False, -enc_frame.audio_level)
 
                     # send packet
                     self.__log_debug("> %s", packet)
@@ -376,7 +369,6 @@ class RTCRtpSender:
 
     async def _run_rtcp(self) -> None:
         self.__log_debug("- RTCP started")
-        self.__rtcp_started.set()
 
         try:
             while True:
@@ -433,6 +425,9 @@ class RTCRtpSender:
             await self.transport._send_rtp(payload)
         except ConnectionError:
             pass
+
+    def __log_debug(self, msg: str, *args) -> None:
+        logger.debug(f"RTCRtpSender(%s) {msg}", self.__kind, *args)
 
     def __log_warning(self, msg: str, *args) -> None:
         logger.warning(f"RTCRtpsender(%s) {msg}", self.__kind, *args)

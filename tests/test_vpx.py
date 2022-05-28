@@ -165,11 +165,11 @@ class Vp8Test(CodecTestCase):
 
     def test_decoder(self):
         decoder = get_decoder(VP8_CODEC)
-        self.assertIsInstance(decoder, Vp8Decoder)
+        self.assertTrue(isinstance(decoder, Vp8Decoder))
 
     def test_encoder(self):
         encoder = get_encoder(VP8_CODEC)
-        self.assertIsInstance(encoder, Vp8Encoder)
+        self.assertTrue(isinstance(encoder, Vp8Encoder))
 
         frame = self.create_video_frame(width=640, height=480, pts=0)
         payloads, timestamp = encoder.encode(frame)
@@ -186,7 +186,7 @@ class Vp8Test(CodecTestCase):
 
     def test_encoder_rgb(self):
         encoder = get_encoder(VP8_CODEC)
-        self.assertIsInstance(encoder, Vp8Encoder)
+        self.assertTrue(isinstance(encoder, Vp8Encoder))
 
         frame = self.create_video_frame(width=640, height=480, pts=0, format="rgb24")
         payloads, timestamp = encoder.encode(frame)
@@ -194,19 +194,9 @@ class Vp8Test(CodecTestCase):
         self.assertTrue(len(payloads[0]) < 1300)
         self.assertEqual(timestamp, 0)
 
-    def test_encoder_pack(self):
-        encoder = get_encoder(VP8_CODEC)
-        self.assertTrue(isinstance(encoder, Vp8Encoder))
-        encoder.picture_id = 0
-
-        packet = self.create_packet(payload=b"\x00", pts=1)
-        payloads, timestamp = encoder.pack(packet)
-        self.assertEqual(payloads, [b"\x90\x80\x00\x00"])
-        self.assertEqual(timestamp, 90)
-
     def test_encoder_large(self):
         encoder = get_encoder(VP8_CODEC)
-        self.assertIsInstance(encoder, Vp8Encoder)
+        self.assertTrue(isinstance(encoder, Vp8Encoder))
 
         # first keyframe
         frame = self.create_video_frame(width=2560, height=1920, pts=0)
@@ -231,7 +221,7 @@ class Vp8Test(CodecTestCase):
 
     def test_encoder_target_bitrate(self):
         encoder = get_encoder(VP8_CODEC)
-        self.assertIsInstance(encoder, Vp8Encoder)
+        self.assertTrue(isinstance(encoder, Vp8Encoder))
         self.assertEqual(encoder.target_bitrate, 500000)
 
         frame = self.create_video_frame(width=640, height=480, pts=0)

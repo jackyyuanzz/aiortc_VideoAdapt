@@ -1,0 +1,3 @@
+python cli.py -s unix-socket --play-from test.mp4 offer
+
+python cli.py -s unix-socket --record-to some.mp4 answer

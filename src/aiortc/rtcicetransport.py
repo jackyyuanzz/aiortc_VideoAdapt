@@ -5,16 +5,13 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from aioice import Candidate, Connection, ConnectionClosed
-from pyee.asyncio import AsyncIOEventEmitter
+from pyee import AsyncIOEventEmitter
 
 from .exceptions import InvalidStateError
 from .rtcconfiguration import RTCIceServer
 
 STUN_REGEX = re.compile(
     r"(?P<scheme>stun|stuns)\:(?P<host>[^?:]+)(\:(?P<port>[0-9]+?))?"
-    # RFC 7064 does not define a "transport" option but some providers
-    # include it, so just ignore it
-    r"(\?transport=.*)?"
 )
 TURN_REGEX = re.compile(
     r"(?P<scheme>turn|turns)\:(?P<host>[^?:]+)(\:(?P<port>[0-9]+?))?"

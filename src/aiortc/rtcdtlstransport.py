@@ -15,7 +15,7 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.bindings.openssl.binding import Binding
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
-from pyee.asyncio import AsyncIOEventEmitter
+from pyee import AsyncIOEventEmitter
 from pylibsrtp import Policy, Session
 
 from . import clock, rtp
@@ -67,7 +67,7 @@ def certificate_digest(x509) -> str:
     result_length[0] = len(result_buffer)
 
     digest_result = lib.X509_digest(x509, digest, result_buffer, result_length)
-    _openssl_assert(digest_result == 1)
+    assert digest_result == 1
 
     return b":".join(
         [

@@ -22,8 +22,13 @@ from typing import (
     no_type_check,
 )
 
-from google_crc32c import value as crc32c
-from pyee.asyncio import AsyncIOEventEmitter
+# The `crc32c` package offers better performance but uses an LGPL license,
+# so we use `google-crc32c` by default.
+try:
+    from crc32c import crc32c
+except ImportError:
+    from google_crc32c import value as crc32c
+from pyee import AsyncIOEventEmitter
 
 from .exceptions import InvalidStateError
 from .rtcdatachannel import RTCDataChannel, RTCDataChannelParameters
@@ -54,7 +59,7 @@ SCTP_RTO_BETA = 1 / 4
 SCTP_RTO_INITIAL = 3.0
 SCTP_RTO_MIN = 1
 SCTP_RTO_MAX = 60
-SCTP_TSN_MODULO = 2**32
+SCTP_TSN_MODULO = 2 ** 32
 
 RECONFIG_MAX_STREAMS = 135
 
@@ -676,7 +681,7 @@ class RTCSctpTransport(AsyncIOEventEmitter):
     @property
     def maxChannels(self) -> Optional[int]:
         """
-        The maximum number of :class:`RTCDataChannel` that can be used simultaneously.
+        The maximum number of :class:`RTCDataChannel`s that can be used simultaneously.
         """
         if self._inbound_streams_count:
             return min(self._inbound_streams_count, self._outbound_streams_count)

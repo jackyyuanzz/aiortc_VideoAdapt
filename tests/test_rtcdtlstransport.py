@@ -31,7 +31,7 @@ from aiortc.rtp import (
     pack_remb_fci,
 )
 
-from .utils import asynctest, dummy_ice_transport_pair, load
+from .utils import dummy_ice_transport_pair, load, run
 
 RTP = load("rtp.bin")
 RTCP = load("rtcp_sr.bin")
@@ -75,7 +75,7 @@ class RTCCertificateTest(TestCase):
 
         expires = certificate.expires
         self.assertIsNotNone(expires)
-        self.assertIsInstance(expires, datetime.datetime)
+        self.assertTrue(isinstance(expires, datetime.datetime))
 
         fingerprints = certificate.getFingerprints()
         self.assertEqual(len(fingerprints), 1)
@@ -102,8 +102,7 @@ class RTCDtlsTransportTest(TestCase):
         self.assertEqual(stats_b.bytesSent, stats_a.bytesReceived)
 
     @patch("aiortc.rtcdtlstransport.lib.SSL_CTX_use_certificate")
-    @asynctest
-    async def test_broken_ssl(self, mock_use_certificate):
+    def test_broken_ssl(self, mock_use_certificate):
         mock_use_certificate.return_value = 0
 
         transport1, transport2 = dummy_ice_transport_pair()
@@ -112,8 +111,7 @@ class RTCDtlsTransportTest(TestCase):
         with self.assertRaises(DtlsError):
             RTCDtlsTransport(transport1, [certificate])
 
-    @asynctest
-    async def test_data(self):
+    def test_data(self):
         transport1, transport2 = dummy_ice_transport_pair()
 
         certificate1 = RTCCertificate.generateCertificate()
@@ -126,36 +124,37 @@ class RTCDtlsTransportTest(TestCase):
         receiver2 = DummyDataReceiver()
         session2._register_data_receiver(receiver2)
 
-        await asyncio.gather(
-            session1.start(session2.getLocalParameters()),
-            session2.start(session1.getLocalParameters()),
+        run(
+            asyncio.gather(
+                session1.start(session2.getLocalParameters()),
+                session2.start(session1.getLocalParameters()),
+            )
         )
 
         # send encypted data
-        await session1._send_data(b"ping")
-        await asyncio.sleep(0.1)
+        run(session1._send_data(b"ping"))
+        run(asyncio.sleep(0.1))
         self.assertEqual(receiver2.data, [b"ping"])
 
-        await session2._send_data(b"pong")
-        await asyncio.sleep(0.1)
+        run(session2._send_data(b"pong"))
+        run(asyncio.sleep(0.1))
         self.assertEqual(receiver1.data, [b"pong"])
 
         # shutdown
-        await session1.stop()
-        await asyncio.sleep(0.1)
+        run(session1.stop())
+        run(asyncio.sleep(0.1))
         self.assertEqual(session1.state, "closed")
         self.assertEqual(session2.state, "closed")
 
         # try closing again
-        await session1.stop()
-        await session2.stop()
+        run(session1.stop())
+        run(session2.stop())
 
         # try sending after close
         with self.assertRaises(ConnectionError):
-            await session1._send_data(b"foo")
+            run(session1._send_data(b"foo"))
 
-    @asynctest
-    async def test_data_handler_error(self):
+    def test_data_handler_error(self):
         transport1, transport2 = dummy_ice_transport_pair()
 
         certificate1 = RTCCertificate.generateCertificate()
@@ -167,21 +166,22 @@ class RTCDtlsTransportTest(TestCase):
         session2 = RTCDtlsTransport(transport2, [certificate2])
         session2._register_data_receiver(BrokenDataReceiver())
 
-        await asyncio.gather(
-            session1.start(session2.getLocalParameters()),
-            session2.start(session1.getLocalParameters()),
+        run(
+            asyncio.gather(
+                session1.start(session2.getLocalParameters()),
+                session2.start(session1.getLocalParameters()),
+            )
         )
 
         # send encypted data
-        await session1._send_data(b"ping")
-        await asyncio.sleep(0.1)
+        run(session1._send_data(b"ping"))
+        run(asyncio.sleep(0.1))
 
         # shutdown
-        await session1.stop()
-        await session2.stop()
+        run(session1.stop())
+        run(session2.stop())
 
-    @asynctest
-    async def test_rtp(self):
+    def test_rtp(self):
         transport1, transport2 = dummy_ice_transport_pair()
 
         certificate1 = RTCCertificate.generateCertificate()
@@ -214,56 +214,56 @@ class RTCDtlsTransportTest(TestCase):
             ),
         )
 
-        await asyncio.gather(
-            session1.start(session2.getLocalParameters()),
-            session2.start(session1.getLocalParameters()),
+        run(
+            asyncio.gather(
+                session1.start(session2.getLocalParameters()),
+                session2.start(session1.getLocalParameters()),
+            )
         )
         self.assertCounters(session1, session2, 2, 2)
 
         # send RTP
-        await session1._send_rtp(RTP)
-        await asyncio.sleep(0.1)
+        run(session1._send_rtp(RTP))
+        run(asyncio.sleep(0.1))
         self.assertCounters(session1, session2, 3, 2)
         self.assertEqual(len(receiver2.rtcp_packets), 0)
         self.assertEqual(len(receiver2.rtp_packets), 1)
 
         # send RTCP
-        await session2._send_rtp(RTCP)
-        await asyncio.sleep(0.1)
+        run(session2._send_rtp(RTCP))
+        run(asyncio.sleep(0.1))
         self.assertCounters(session1, session2, 3, 3)
         self.assertEqual(len(receiver1.rtcp_packets), 1)
         self.assertEqual(len(receiver1.rtp_packets), 0)
 
         # shutdown
-        await session1.stop()
-        await asyncio.sleep(0.1)
+        run(session1.stop())
+        run(asyncio.sleep(0.1))
         self.assertCounters(session1, session2, 4, 3)
         self.assertEqual(session1.state, "closed")
         self.assertEqual(session2.state, "closed")
 
         # try closing again
-        await session1.stop()
-        await session2.stop()
+        run(session1.stop())
+        run(session2.stop())
 
         # try sending after close
         with self.assertRaises(ConnectionError):
-            await session1._send_rtp(RTP)
+            run(session1._send_rtp(RTP))
 
-    @asynctest
-    async def test_rtp_malformed(self):
+    def test_rtp_malformed(self):
         transport1, transport2 = dummy_ice_transport_pair()
 
         certificate1 = RTCCertificate.generateCertificate()
         session1 = RTCDtlsTransport(transport1, [certificate1])
 
         # receive truncated RTP
-        await session1._handle_rtp_data(RTP[0:8], 0)
+        run(session1._handle_rtp_data(RTP[0:8], 0))
 
         # receive truncated RTCP
-        await session1._handle_rtcp_data(RTCP[0:8])
+        run(session1._handle_rtcp_data(RTCP[0:8]))
 
-    @asynctest
-    async def test_srtp_unprotect_error(self):
+    def test_srtp_unprotect_error(self):
         transport1, transport2 = dummy_ice_transport_pair()
 
         certificate1 = RTCCertificate.generateCertificate()
@@ -296,25 +296,26 @@ class RTCDtlsTransportTest(TestCase):
             ),
         )
 
-        await asyncio.gather(
-            session1.start(session2.getLocalParameters()),
-            session2.start(session1.getLocalParameters()),
+        run(
+            asyncio.gather(
+                session1.start(session2.getLocalParameters()),
+                session2.start(session1.getLocalParameters()),
+            )
         )
 
         # send same RTP twice, to trigger error on the receiver side:
         # "replay check failed (bad index)"
-        await session1._send_rtp(RTP)
-        await session1._send_rtp(RTP)
-        await asyncio.sleep(0.1)
+        run(session1._send_rtp(RTP))
+        run(session1._send_rtp(RTP))
+        run(asyncio.sleep(0.1))
         self.assertEqual(len(receiver2.rtcp_packets), 0)
         self.assertEqual(len(receiver2.rtp_packets), 1)
 
         # shutdown
-        await session1.stop()
-        await session2.stop()
+        run(session1.stop())
+        run(session2.stop())
 
-    @asynctest
-    async def test_abrupt_disconnect(self):
+    def test_abrupt_disconnect(self):
         transport1, transport2 = dummy_ice_transport_pair()
 
         certificate1 = RTCCertificate.generateCertificate()
@@ -323,26 +324,26 @@ class RTCDtlsTransportTest(TestCase):
         certificate2 = RTCCertificate.generateCertificate()
         session2 = RTCDtlsTransport(transport2, [certificate2])
 
-        await asyncio.gather(
-            session1.start(session2.getLocalParameters()),
-            session2.start(session1.getLocalParameters()),
+        run(
+            asyncio.gather(
+                session1.start(session2.getLocalParameters()),
+                session2.start(session1.getLocalParameters()),
+            )
         )
 
         # break connections -> tasks exits
-        await transport1.stop()
-        await transport2.stop()
-        await asyncio.sleep(0.1)
+        run(transport1.stop())
+        run(transport2.stop())
 
         # close DTLS
-        await session1.stop()
-        await session2.stop()
+        run(session1.stop())
+        run(session2.stop())
 
         # check outcome
         self.assertEqual(session1.state, "closed")
         self.assertEqual(session2.state, "closed")
 
-    @asynctest
-    async def test_abrupt_disconnect_2(self):
+    def test_abrupt_disconnect_2(self):
         transport1, transport2 = dummy_ice_transport_pair()
 
         certificate1 = RTCCertificate.generateCertificate()
@@ -351,9 +352,11 @@ class RTCDtlsTransportTest(TestCase):
         certificate2 = RTCCertificate.generateCertificate()
         session2 = RTCDtlsTransport(transport2, [certificate2])
 
-        await asyncio.gather(
-            session1.start(session2.getLocalParameters()),
-            session2.start(session1.getLocalParameters()),
+        run(
+            asyncio.gather(
+                session1.start(session2.getLocalParameters()),
+                session2.start(session1.getLocalParameters()),
+            )
         )
 
         def fake_write_ssl():
@@ -362,16 +365,14 @@ class RTCDtlsTransportTest(TestCase):
         session1._write_ssl = fake_write_ssl
 
         # close DTLS -> ConnectionError
-        await session1.stop()
-        await session2.stop()
-        await asyncio.sleep(0.1)
+        run(session1.stop())
+        run(session2.stop())
 
         # check outcome
         self.assertEqual(session1.state, "closed")
         self.assertEqual(session2.state, "closed")
 
-    @asynctest
-    async def test_bad_client_fingerprint(self):
+    def test_bad_client_fingerprint(self):
         transport1, transport2 = dummy_ice_transport_pair()
 
         certificate1 = RTCCertificate.generateCertificate()
@@ -385,21 +386,22 @@ class RTCDtlsTransportTest(TestCase):
                 RTCDtlsFingerprint(algorithm="sha-256", value="bogus_fingerprint")
             ]
         )
-        await asyncio.gather(
-            session1.start(bogus_parameters),
-            session2.start(session1.getLocalParameters()),
+        run(
+            asyncio.gather(
+                session1.start(bogus_parameters),
+                session2.start(session1.getLocalParameters()),
+            )
         )
         self.assertEqual(session1.state, "failed")
         self.assertEqual(session2.state, "connected")
 
-        await session1.stop()
-        await session2.stop()
+        run(session1.stop())
+        run(session2.stop())
 
     @patch("aiortc.rtcdtlstransport.lib.SSL_do_handshake")
     @patch("aiortc.rtcdtlstransport.lib.SSL_get_error")
     @patch("aiortc.rtcdtlstransport.lib.ERR_get_error")
-    @asynctest
-    async def test_handshake_error(
+    def test_handshake_error(
         self, mock_err_get_error, mock_ssl_get_error, mock_do_handshake
     ):
         mock_err_get_error.side_effect = [0x2006D080, 0, 0]
@@ -414,18 +416,19 @@ class RTCDtlsTransportTest(TestCase):
         certificate2 = RTCCertificate.generateCertificate()
         session2 = RTCDtlsTransport(transport2, [certificate2])
 
-        await asyncio.gather(
-            session1.start(session2.getLocalParameters()),
-            session2.start(session1.getLocalParameters()),
+        run(
+            asyncio.gather(
+                session1.start(session2.getLocalParameters()),
+                session2.start(session1.getLocalParameters()),
+            )
         )
         self.assertEqual(session1.state, "failed")
         self.assertEqual(session2.state, "failed")
 
-        await session1.stop()
-        await session2.stop()
+        run(session1.stop())
+        run(session2.stop())
 
-    @asynctest
-    async def test_lossy_channel(self):
+    def test_lossy_channel(self):
         """
         Transport with 25% loss eventually connects.
         """
@@ -440,13 +443,15 @@ class RTCDtlsTransportTest(TestCase):
         certificate2 = RTCCertificate.generateCertificate()
         session2 = RTCDtlsTransport(transport2, [certificate2])
 
-        await asyncio.gather(
-            session1.start(session2.getLocalParameters()),
-            session2.start(session1.getLocalParameters()),
+        run(
+            asyncio.gather(
+                session1.start(session2.getLocalParameters()),
+                session2.start(session1.getLocalParameters()),
+            )
         )
 
-        await session1.stop()
-        await session2.stop()
+        run(session1.stop())
+        run(session2.stop())
 
 
 class RtpRouterTest(TestCase):

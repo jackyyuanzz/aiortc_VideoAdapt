@@ -19,11 +19,7 @@ from aiortc.exceptions import (
     OperationError,
 )
 from aiortc.mediastreams import AudioStreamTrack, VideoStreamTrack
-from aiortc.rtcpeerconnection import (
-    filter_preferred_codecs,
-    find_common_codecs,
-    is_codec_compatible,
-)
+from aiortc.rtcpeerconnection import filter_preferred_codecs, find_common_codecs
 from aiortc.rtcrtpparameters import (
     RTCRtcpFeedback,
     RTCRtpCodecCapability,
@@ -34,37 +30,10 @@ from aiortc.sdp import SessionDescription
 from aiortc.stats import RTCStatsReport
 
 from .test_contrib_media import MediaTestCase
-from .utils import asynctest, lf2crlf
+from .utils import lf2crlf, run
 
 LONG_DATA = b"\xff" * 2000
 STRIP_CANDIDATES_RE = re.compile("^a=(candidate:.*|end-of-candidates)\r\n", re.M)
-
-H264_SDP = lf2crlf(
-    """a=rtpmap:99 H264/90000
-a=rtcp-fb:99 nack
-a=rtcp-fb:99 nack pli
-a=rtcp-fb:99 goog-remb
-a=fmtp:99 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f
-a=rtpmap:100 rtx/90000
-a=fmtp:100 apt=99
-a=rtpmap:101 H264/90000
-a=rtcp-fb:101 nack
-a=rtcp-fb:101 nack pli
-a=rtcp-fb:101 goog-remb
-a=fmtp:101 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f
-a=rtpmap:102 rtx/90000
-a=fmtp:102 apt=101
-"""
-)
-VP8_SDP = lf2crlf(
-    """a=rtpmap:97 VP8/90000
-a=rtcp-fb:97 nack
-a=rtcp-fb:97 nack pli
-a=rtcp-fb:97 goog-remb
-a=rtpmap:98 rtx/90000
-a=fmtp:98 apt=97
-"""
-)
 
 
 class BogusStreamTrack(AudioStreamTrack):
@@ -122,7 +91,7 @@ def track_remote_tracks(pc):
 
 
 class RTCRtpCodecParametersTest(TestCase):
-    def test_find_common_codecs_static(self):
+    def test_common_static(self):
         local_codecs = [
             RTCRtpCodecParameters(
                 mimeType="audio/opus", clockRate=48000, channels=2, payloadType=96
@@ -155,7 +124,7 @@ class RTCRtpCodecParametersTest(TestCase):
             ],
         )
 
-    def find_common_codecs_dynamic(self):
+    def test_common_dynamic(self):
         local_codecs = [
             RTCRtpCodecParameters(
                 mimeType="audio/opus", clockRate=48000, channels=2, payloadType=96
@@ -188,7 +157,7 @@ class RTCRtpCodecParametersTest(TestCase):
             ],
         )
 
-    def find_common_codecs_feedback(self):
+    def test_common_feedback(self):
         local_codecs = [
             RTCRtpCodecParameters(
                 mimeType="video/VP8",
@@ -218,7 +187,7 @@ class RTCRtpCodecParametersTest(TestCase):
         self.assertEqual(common[0].payloadType, 120)
         self.assertEqual(common[0].rtcpFeedback, [RTCRtcpFeedback(type="nack")])
 
-    def test_find_common_codecs_rtx(self):
+    def test_common_rtx(self):
         local_codecs = [
             RTCRtpCodecParameters(
                 mimeType="video/VP8", clockRate=90000, payloadType=100
@@ -266,7 +235,7 @@ class RTCRtpCodecParametersTest(TestCase):
             ],
         )
 
-    def test_filter_preferred_codecs(self):
+    def test_filter_preferred(self):
         codecs = [
             RTCRtpCodecParameters(
                 mimeType="video/VP8", clockRate=90000, payloadType=100
@@ -374,131 +343,6 @@ class RTCRtpCodecParametersTest(TestCase):
             ],
         )
 
-    def test_is_codec_compatible(self):
-        # compatible: identical
-        self.assertTrue(
-            is_codec_compatible(
-                RTCRtpCodecParameters(
-                    mimeType="video/H264", clockRate=90000, payloadType=102
-                ),
-                RTCRtpCodecParameters(
-                    mimeType="video/H264", clockRate=90000, payloadType=102
-                ),
-            )
-        )
-        self.assertTrue(
-            is_codec_compatible(
-                RTCRtpCodecParameters(
-                    mimeType="video/H264",
-                    clockRate=90000,
-                    payloadType=102,
-                    parameters={
-                        "packetization-mode": "0",
-                        "profile-level-id": "42E01F",
-                    },
-                ),
-                RTCRtpCodecParameters(
-                    mimeType="video/H264",
-                    clockRate=90000,
-                    payloadType=102,
-                ),
-            )
-        )
-
-        # incompatible: different clockRate
-        self.assertFalse(
-            is_codec_compatible(
-                RTCRtpCodecParameters(
-                    mimeType="video/H264", clockRate=90000, payloadType=102
-                ),
-                RTCRtpCodecParameters(
-                    mimeType="video/H264", clockRate=12345, payloadType=102
-                ),
-            )
-        )
-
-        # incompatible: different mimeType
-        self.assertFalse(
-            is_codec_compatible(
-                RTCRtpCodecParameters(
-                    mimeType="video/H264", clockRate=90000, payloadType=102
-                ),
-                RTCRtpCodecParameters(
-                    mimeType="video/VP8", clockRate=90000, payloadType=102
-                ),
-            )
-        )
-
-        # incompatible: different H.264 profile
-        self.assertFalse(
-            is_codec_compatible(
-                RTCRtpCodecParameters(
-                    mimeType="video/H264",
-                    clockRate=90000,
-                    payloadType=102,
-                    parameters={
-                        "packetization-mode": "1",
-                        "profile-level-id": "42001f",
-                    },
-                ),
-                RTCRtpCodecParameters(
-                    mimeType="video/H264",
-                    clockRate=90000,
-                    payloadType=102,
-                    parameters={
-                        "packetization-mode": "1",
-                        "profile-level-id": "42e01f",
-                    },
-                ),
-            )
-        )
-
-        # incompatible: different H.264 packetization mode
-        self.assertFalse(
-            is_codec_compatible(
-                RTCRtpCodecParameters(
-                    mimeType="video/H264",
-                    clockRate=90000,
-                    payloadType=102,
-                    parameters={
-                        "packetization-mode": "0",
-                        "profile-level-id": "42001f",
-                    },
-                ),
-                RTCRtpCodecParameters(
-                    mimeType="video/H264",
-                    clockRate=90000,
-                    payloadType=102,
-                    parameters={
-                        "packetization-mode": "1",
-                        "profile-level-id": "42001f",
-                    },
-                ),
-            )
-        )
-
-        # incompatible: cannot parse H.264 profile
-        self.assertFalse(
-            is_codec_compatible(
-                RTCRtpCodecParameters(
-                    mimeType="video/H264",
-                    clockRate=90000,
-                    payloadType=102,
-                    parameters={
-                        "profile-level-id": "42001f",
-                    },
-                ),
-                RTCRtpCodecParameters(
-                    mimeType="video/H264",
-                    clockRate=90000,
-                    payloadType=102,
-                    parameters={
-                        "profile-level-id": "blah",
-                    },
-                ),
-            )
-        )
-
 
 class RTCPeerConnectionTest(TestCase):
     def assertBundled(self, pc):
@@ -513,17 +357,12 @@ class RTCPeerConnectionTest(TestCase):
         if pc.sctp:
             self.assertEqual(pc.sctp.transport, transport)
 
-    async def assertDataChannelOpen(self, dc):
-        await self.sleepWhile(lambda: dc.readyState == "connecting")
+    def assertDataChannelOpen(self, dc):
+        self.sleepWhile(lambda: dc.readyState == "connecting")
         self.assertEqual(dc.readyState, "open")
 
-    async def assertIceChecking(self, pc):
-        await self.sleepWhile(lambda: pc.iceConnectionState == "new")
-        self.assertEqual(pc.iceConnectionState, "checking")
-        self.assertEqual(pc.iceGatheringState, "complete")
-
-    async def assertIceCompleted(self, pc1, pc2):
-        await self.sleepWhile(
+    def assertIceCompleted(self, pc1, pc2):
+        self.sleepWhile(
             lambda: pc1.iceConnectionState == "checking"
             or pc2.iceConnectionState == "checking"
         )
@@ -540,16 +379,16 @@ class RTCPeerConnectionTest(TestCase):
             set(re.findall("a=setup:(.*)\r$", description.sdp)), set([setup])
         )
 
-    async def closeDataChannel(self, dc):
+    def closeDataChannel(self, dc):
         dc.close()
-        await self.sleepWhile(lambda: dc.readyState == "closing")
+        self.sleepWhile(lambda: dc.readyState == "closing")
         self.assertEqual(dc.readyState, "closed")
 
-    async def sleepWhile(self, f, max_sleep=1.0):
+    def sleepWhile(self, f, max_sleep=1.0):
         sleep = 0.1
         total = 0.0
         while f() and total < max_sleep:
-            await asyncio.sleep(sleep)
+            run(asyncio.sleep(sleep))
             total += sleep
 
     def setUp(self):
@@ -572,27 +411,27 @@ class RTCPeerConnectionTest(TestCase):
         aioice.stun.RETRY_MAX = self.retry_max
         aioice.stun.RETRY_RTO = self.retry_rto
 
-    @asynctest
-    async def test_addIceCandidate_no_sdpMid_or_sdpMLineIndex(self):
+    def test_addIceCandidate_no_sdpMid_or_sdpMLineIndex(self):
         pc = RTCPeerConnection()
         with self.assertRaises(ValueError) as cm:
-            await pc.addIceCandidate(
-                RTCIceCandidate(
-                    component=1,
-                    foundation="0",
-                    ip="192.168.99.7",
-                    port=33543,
-                    priority=2122252543,
-                    protocol="UDP",
-                    type="host",
+            run(
+                pc.addIceCandidate(
+                    RTCIceCandidate(
+                        component=1,
+                        foundation="0",
+                        ip="192.168.99.7",
+                        port=33543,
+                        priority=2122252543,
+                        protocol="UDP",
+                        type="host",
+                    )
                 )
             )
         self.assertEqual(
             str(cm.exception), "Candidate must have either sdpMid or sdpMLineIndex"
         )
 
-    @asynctest
-    async def test_addTrack_audio(self):
+    def test_addTrack_audio(self):
         pc = RTCPeerConnection()
 
         # add audio track
@@ -616,8 +455,7 @@ class RTCPeerConnectionTest(TestCase):
         self.assertEqual(pc.getSenders(), [sender1, sender2])
         self.assertEqual(len(pc.getTransceivers()), 2)
 
-    @asynctest
-    async def test_addTrack_bogus(self):
+    def test_addTrack_bogus(self):
         pc = RTCPeerConnection()
 
         # try adding a bogus track
@@ -625,8 +463,7 @@ class RTCPeerConnectionTest(TestCase):
             pc.addTrack(BogusStreamTrack())
         self.assertEqual(str(cm.exception), 'Invalid track kind "bogus"')
 
-    @asynctest
-    async def test_addTrack_video(self):
+    def test_addTrack_video(self):
         pc = RTCPeerConnection()
 
         # add video track
@@ -658,16 +495,14 @@ class RTCPeerConnectionTest(TestCase):
         self.assertEqual(pc.getSenders(), [video_sender1, video_sender2, audio_sender])
         self.assertEqual(len(pc.getTransceivers()), 3)
 
-    @asynctest
-    async def test_addTrack_closed(self):
+    def test_addTrack_closed(self):
         pc = RTCPeerConnection()
-        await pc.close()
+        run(pc.close())
         with self.assertRaises(InvalidStateError) as cm:
             pc.addTrack(AudioStreamTrack())
         self.assertEqual(str(cm.exception), "RTCPeerConnection is closed")
 
-    @asynctest
-    async def test_addTransceiver_audio_inactive(self):
+    def test_addTransceiver_audio_inactive(self):
         pc = RTCPeerConnection()
 
         # add transceiver
@@ -690,14 +525,13 @@ class RTCPeerConnectionTest(TestCase):
         self.assertEqual(len(pc.getTransceivers()), 1)
 
         # stop transceiver
-        await transceiver.stop()
+        run(transceiver.stop())
         self.assertEqual(transceiver.currentDirection, None)
         self.assertEqual(transceiver.direction, "sendonly")
         self.assertEqual(transceiver.sender.track, track)
         self.assertEqual(transceiver.stopped, True)
 
-    @asynctest
-    async def test_addTransceiver_audio_sendrecv(self):
+    def test_addTransceiver_audio_sendrecv(self):
         pc = RTCPeerConnection()
 
         # add transceiver
@@ -719,8 +553,7 @@ class RTCPeerConnectionTest(TestCase):
         self.assertEqual(transceiver.stopped, False)
         self.assertEqual(len(pc.getTransceivers()), 1)
 
-    @asynctest
-    async def test_addTransceiver_audio_track(self):
+    def test_addTransceiver_audio_track(self):
         pc = RTCPeerConnection()
 
         # add audio track
@@ -774,20 +607,19 @@ class RTCPeerConnectionTest(TestCase):
             pc.addTransceiver(BogusStreamTrack())
         self.assertEqual(str(cm.exception), 'Invalid track kind "bogus"')
 
-    @asynctest
-    async def test_close(self):
+    def test_close(self):
         pc = RTCPeerConnection()
         pc_states = track_states(pc)
 
         # close once
-        await pc.close()
+        run(pc.close())
 
         # close twice
-        await pc.close()
+        run(pc.close())
 
         self.assertEqual(pc_states["signalingState"], ["stable", "closed"])
 
-    async def _test_connect_audio_bidirectional(self, pc1, pc2):
+    def _test_connect_audio_bidirectional(self, pc1, pc2):
         pc1_states = track_states(pc1)
         pc1_tracks = track_remote_tracks(pc1)
         pc2_states = track_states(pc2)
@@ -806,13 +638,13 @@ class RTCPeerConnectionTest(TestCase):
         # create offer
         track1 = AudioStreamTrack()
         pc1.addTrack(track1)
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -831,7 +663,7 @@ a=rtpmap:8 PCMA/8000
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -845,14 +677,15 @@ a=rtpmap:8 PCMA/8000
         # create answer
         track2 = AudioStreamTrack()
         pc2.addTrack(track2)
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertEqual(mids(pc2), ["0"])
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue(
@@ -871,8 +704,9 @@ a=rtpmap:8 PCMA/8000
         self.assertEqual(pc2.getTransceivers()[0].direction, "sendrecv")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
         self.assertEqual(pc1.getTransceivers()[0].currentDirection, "sendrecv")
         self.assertEqual(pc1.getTransceivers()[0].direction, "sendrecv")
 
@@ -881,14 +715,14 @@ a=rtpmap:8 PCMA/8000
         self.assertEqual(pc1_tracks[0].id, track2.id)
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # allow media to flow long enough to collect stats
-        await asyncio.sleep(2)
+        run(asyncio.sleep(2))
 
         # check stats
-        report = await pc1.getStats()
-        self.assertIsInstance(report, RTCStatsReport)
+        report = run(pc1.getStats())
+        self.assertTrue(isinstance(report, RTCStatsReport))
         self.assertEqual(
             sorted([s.type for s in report.values()]),
             [
@@ -901,8 +735,8 @@ a=rtpmap:8 PCMA/8000
         )
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -935,20 +769,17 @@ a=rtpmap:8 PCMA/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_audio_bidirectional(self):
+    def test_connect_audio_bidirectional(self):
         pc1 = RTCPeerConnection()
         pc2 = RTCPeerConnection()
-        await self._test_connect_audio_bidirectional(pc1, pc2)
+        self._test_connect_audio_bidirectional(pc1, pc2)
 
-    @asynctest
-    async def test_connect_audio_bidirectional_with_empty_iceservers(self):
+    def test_connect_audio_bidirectional_with_empty_iceservers(self):
         pc1 = RTCPeerConnection(RTCConfiguration(iceServers=[]))
         pc2 = RTCPeerConnection()
-        await self._test_connect_audio_bidirectional(pc1, pc2)
+        self._test_connect_audio_bidirectional(pc1, pc2)
 
-    @asynctest
-    async def test_connect_audio_bidirectional_with_trickle(self):
+    def test_connect_audio_bidirectional_with_trickle(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -967,13 +798,13 @@ a=rtpmap:8 PCMA/8000
 
         # create offer
         pc1.addTrack(AudioStreamTrack())
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -986,7 +817,7 @@ a=rtpmap:8 PCMA/8000
         desc1 = strip_ice_candidates(pc1.localDescription)
 
         # handle offer
-        await pc2.setRemoteDescription(desc1)
+        run(pc2.setRemoteDescription(desc1))
         self.assertEqual(pc2.remoteDescription, desc1)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -995,14 +826,15 @@ a=rtpmap:8 PCMA/8000
 
         # create answer
         pc2.addTrack(AudioStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertEqual(mids(pc2), ["0"])
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue("a=sendrecv" in pc2.localDescription.sdp)
@@ -1013,27 +845,28 @@ a=rtpmap:8 PCMA/8000
         desc2 = strip_ice_candidates(pc2.localDescription)
 
         # handle answer
-        await pc1.setRemoteDescription(desc2)
+        run(pc1.setRemoteDescription(desc2))
         self.assertEqual(pc1.remoteDescription, desc2)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # trickle candidates
         for transceiver in pc2.getTransceivers():
             iceGatherer = transceiver.sender.transport.transport.iceGatherer
             for candidate in iceGatherer.getLocalCandidates():
                 candidate.sdpMid = transceiver.mid
-                await pc1.addIceCandidate(candidate)
+                run(pc1.addIceCandidate(candidate))
         for transceiver in pc1.getTransceivers():
             iceGatherer = transceiver.sender.transport.transport.iceGatherer
             for candidate in iceGatherer.getLocalCandidates():
                 candidate.sdpMid = transceiver.mid
-                await pc2.addIceCandidate(candidate)
+                run(pc2.addIceCandidate(candidate))
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -1066,8 +899,7 @@ a=rtpmap:8 PCMA/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_audio_bidirectional_and_close(self):
+    def test_connect_audio_bidirectional_and_close(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -1077,33 +909,33 @@ a=rtpmap:8 PCMA/8000
         # create offer
         track1 = AudioStreamTrack()
         pc1.addTrack(track1)
-        offer = await pc1.createOffer()
-        await pc1.setLocalDescription(offer)
+        offer = run(pc1.createOffer())
+        run(pc1.setLocalDescription(offer))
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
 
         # create answer
         track2 = AudioStreamTrack()
         pc2.addTrack(track2)
-        answer = await pc2.createAnswer()
-        await pc2.setLocalDescription(answer)
+        answer = run(pc2.createAnswer())
+        run(pc2.setLocalDescription(answer))
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # close one side
-        await pc1.close()
+        run(pc1.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
 
         # wait for consent to expire
-        await asyncio.sleep(2)
+        run(asyncio.sleep(2))
 
         # close other side
-        await pc2.close()
+        run(pc2.close())
         self.assertEqual(pc2.iceConnectionState, "closed")
 
         # check state changes
@@ -1137,8 +969,7 @@ a=rtpmap:8 PCMA/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_audio_codec_preferences_offerer(self):
+    def test_connect_audio_codec_preferences_offerer(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -1164,13 +995,13 @@ a=rtpmap:8 PCMA/8000
         transceiver.setCodecPreferences(preferences)
 
         # create offer
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -1188,7 +1019,7 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -1197,14 +1028,15 @@ a=rtpmap:0 PCMU/8000
 
         # create answer
         pc2.addTrack(AudioStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertEqual(mids(pc2), ["0"])
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue(
@@ -1222,20 +1054,21 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(pc2.getTransceivers()[0].direction, "sendrecv")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
         self.assertEqual(pc1.getTransceivers()[0].currentDirection, "sendrecv")
         self.assertEqual(pc1.getTransceivers()[0].direction, "sendrecv")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # allow media to flow long enough to collect stats
-        await asyncio.sleep(2)
+        run(asyncio.sleep(2))
 
         # check stats
-        report = await pc1.getStats()
-        self.assertIsInstance(report, RTCStatsReport)
+        report = run(pc1.getStats())
+        self.assertTrue(isinstance(report, RTCStatsReport))
         self.assertEqual(
             sorted([s.type for s in report.values()]),
             [
@@ -1248,8 +1081,8 @@ a=rtpmap:0 PCMU/8000
         )
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -1282,8 +1115,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_audio_mid_changes(self):
+    def test_connect_audio_mid_changes(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -1305,7 +1137,7 @@ a=rtpmap:0 PCMU/8000
         pc2.addTrack(AudioStreamTrack())
 
         # create offer
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
@@ -1314,7 +1146,7 @@ a=rtpmap:0 PCMU/8000
         # pretend we're Firefox!
         offer.sdp = offer.sdp.replace("a=mid:0", "a=mid:sdparta_0")
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["sdparta_0"])
@@ -1325,7 +1157,7 @@ a=rtpmap:0 PCMU/8000
         self.assertTrue("a=mid:sdparta_0" in pc1.localDescription.sdp)
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -1333,14 +1165,15 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(mids(pc2), ["sdparta_0"])
 
         # create answer
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue("a=sendrecv" in pc2.localDescription.sdp)
         self.assertHasIceCandidates(pc2.localDescription)
@@ -1348,15 +1181,16 @@ a=rtpmap:0 PCMU/8000
         self.assertTrue("a=mid:sdparta_0" in pc2.localDescription.sdp)
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -1389,8 +1223,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_audio_offer_recvonly_answer_recvonly(self):
+    def test_connect_audio_offer_recvonly_answer_recvonly(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -1409,13 +1242,13 @@ a=rtpmap:0 PCMU/8000
 
         # create offer
         pc1.addTransceiver("audio", direction="recvonly")
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -1425,7 +1258,7 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -1433,14 +1266,15 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(mids(pc2), ["0"])
 
         # create answer
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertEqual(mids(pc2), ["0"])
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue("a=inactive" in pc2.localDescription.sdp)
@@ -1450,17 +1284,18 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(pc2.getTransceivers()[0].direction, "recvonly")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
         self.assertEqual(pc1.getTransceivers()[0].currentDirection, "inactive")
         self.assertEqual(pc1.getTransceivers()[0].direction, "recvonly")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -1493,8 +1328,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_audio_offer_recvonly(self):
+    def test_connect_audio_offer_recvonly(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -1513,13 +1347,13 @@ a=rtpmap:0 PCMU/8000
 
         # create offer
         pc1.addTransceiver("audio", direction="recvonly")
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -1529,7 +1363,7 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -1538,14 +1372,15 @@ a=rtpmap:0 PCMU/8000
 
         # create answer
         pc2.addTrack(AudioStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertEqual(mids(pc2), ["0"])
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue("a=sendonly" in pc2.localDescription.sdp)
@@ -1555,17 +1390,18 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(pc2.getTransceivers()[0].direction, "sendrecv")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
         self.assertEqual(pc1.getTransceivers()[0].currentDirection, "recvonly")
         self.assertEqual(pc1.getTransceivers()[0].direction, "recvonly")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -1598,8 +1434,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_audio_offer_sendonly(self):
+    def test_connect_audio_offer_sendonly(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -1618,13 +1453,13 @@ a=rtpmap:0 PCMU/8000
 
         # create offer
         pc1.addTransceiver(AudioStreamTrack(), direction="sendonly")
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -1634,7 +1469,7 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -1642,14 +1477,15 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(mids(pc2), ["0"])
 
         # create answer
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertEqual(mids(pc2), ["0"])
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue("a=recvonly" in pc2.localDescription.sdp)
@@ -1659,17 +1495,18 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(pc2.getTransceivers()[0].direction, "recvonly")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
         self.assertEqual(pc1.getTransceivers()[0].currentDirection, "sendonly")
         self.assertEqual(pc1.getTransceivers()[0].direction, "sendonly")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -1702,8 +1539,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_audio_offer_sendrecv_answer_recvonly(self):
+    def test_connect_audio_offer_sendrecv_answer_recvonly(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -1722,13 +1558,13 @@ a=rtpmap:0 PCMU/8000
 
         # create offer
         pc1.addTrack(AudioStreamTrack())
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertTrue("m=audio " in pc1.localDescription.sdp)
@@ -1737,7 +1573,7 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -1745,14 +1581,15 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(mids(pc2), ["0"])
 
         # create answer
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue("a=recvonly" in pc2.localDescription.sdp)
         self.assertHasIceCandidates(pc2.localDescription)
@@ -1761,17 +1598,18 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(pc2.getTransceivers()[0].direction, "recvonly")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
         self.assertEqual(pc1.getTransceivers()[0].currentDirection, "sendonly")
         self.assertEqual(pc1.getTransceivers()[0].direction, "sendrecv")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -1804,8 +1642,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_audio_offer_sendrecv_answer_sendonly(self):
+    def test_connect_audio_offer_sendrecv_answer_sendonly(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -1824,13 +1661,13 @@ a=rtpmap:0 PCMU/8000
 
         # create offer
         pc1.addTrack(AudioStreamTrack())
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertTrue("m=audio " in pc1.localDescription.sdp)
@@ -1839,7 +1676,7 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         pc2.getTransceivers()[0].direction = "sendonly"
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
@@ -1848,14 +1685,15 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(mids(pc2), ["0"])
 
         # create answer
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue("a=sendonly" in pc2.localDescription.sdp)
         self.assertHasIceCandidates(pc2.localDescription)
@@ -1864,17 +1702,18 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(pc2.getTransceivers()[0].direction, "sendonly")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
         self.assertEqual(pc1.getTransceivers()[0].currentDirection, "recvonly")
         self.assertEqual(pc1.getTransceivers()[0].direction, "sendrecv")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -1907,8 +1746,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_audio_two_tracks(self):
+    def test_connect_audio_two_tracks(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -1928,13 +1766,13 @@ a=rtpmap:0 PCMU/8000
         # create offer
         pc1.addTrack(AudioStreamTrack())
         pc1.addTrack(AudioStreamTrack())
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0", "1"])
@@ -1944,7 +1782,7 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 2)
         self.assertEqual(len(pc2.getSenders()), 2)
@@ -1953,14 +1791,15 @@ a=rtpmap:0 PCMU/8000
 
         # create answer
         pc2.addTrack(AudioStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertEqual(mids(pc2), ["0", "1"])
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue("a=sendrecv" in pc2.localDescription.sdp)
@@ -1968,15 +1807,16 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc2.localDescription, "active")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -2009,8 +1849,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_audio_and_video(self):
+    def test_connect_audio_and_video(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -2032,18 +1871,18 @@ a=rtpmap:0 PCMU/8000
         # create offer
         pc1.addTrack(AudioStreamTrack())
         pc1.addTrack(VideoStreamTrack())
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertTrue("m=video " in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0", "1"])
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 2)
         self.assertEqual(len(pc2.getSenders()), 2)
@@ -2053,30 +1892,32 @@ a=rtpmap:0 PCMU/8000
         # create answer
         pc2.addTrack(AudioStreamTrack())
         pc2.addTrack(VideoStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertTrue("m=video " in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue("m=video " in pc2.localDescription.sdp)
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # check a single transport is used
         self.assertBundled(pc1)
         self.assertBundled(pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -2109,7 +1950,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    async def _test_connect_audio_and_video_mediaplayer(self, stop_tracks: bool):
+    def _test_connect_audio_and_video_mediaplayer(self, stop_tracks: bool):
         """
         Negotiate bidirectional audio + video, with one party reading media from a file.
 
@@ -2139,18 +1980,18 @@ a=rtpmap:0 PCMU/8000
         # create offer
         pc1.addTrack(player.audio)
         pc1.addTrack(player.video)
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertTrue("m=video " in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0", "1"])
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 2)
         self.assertEqual(len(pc2.getSenders()), 2)
@@ -2160,29 +2001,31 @@ a=rtpmap:0 PCMU/8000
         # create answer
         pc2.addTrack(AudioStreamTrack())
         pc2.addTrack(VideoStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertTrue("m=video " in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue("m=video " in pc2.localDescription.sdp)
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # check a single transport is used
         self.assertBundled(pc1)
         self.assertBundled(pc2)
 
         # let media flow
-        await asyncio.sleep(1)
+        run(asyncio.sleep(1))
 
         # stop tracks
         if stop_tracks:
@@ -2190,8 +2033,8 @@ a=rtpmap:0 PCMU/8000
             player.video.stop()
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -2225,16 +2068,13 @@ a=rtpmap:0 PCMU/8000
         )
         media_test.tearDown()
 
-    @asynctest
-    async def test_connect_audio_and_video_mediaplayer(self):
-        await self._test_connect_audio_and_video_mediaplayer(stop_tracks=False)
+    def test_connect_audio_and_video_mediaplayer(self):
+        self._test_connect_audio_and_video_mediaplayer(stop_tracks=False)
 
-    @asynctest
-    async def test_connect_audio_and_video_mediaplayer_stop_tracks(self):
-        await self._test_connect_audio_and_video_mediaplayer(stop_tracks=True)
+    def test_connect_audio_and_video_mediaplayer_stop_tracks(self):
+        self._test_connect_audio_and_video_mediaplayer(stop_tracks=True)
 
-    @asynctest
-    async def test_connect_audio_and_video_and_data_channel(self):
+    def test_connect_audio_and_video_and_data_channel(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -2255,19 +2095,19 @@ a=rtpmap:0 PCMU/8000
         pc1.addTrack(AudioStreamTrack())
         pc1.addTrack(VideoStreamTrack())
         pc1.createDataChannel("chat", protocol="bob")
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertTrue("m=video " in offer.sdp)
         self.assertTrue("m=application " in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0", "1", "2"])
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 2)
         self.assertEqual(len(pc2.getSenders()), 2)
@@ -2277,32 +2117,34 @@ a=rtpmap:0 PCMU/8000
         # create answer
         pc2.addTrack(AudioStreamTrack())
         pc2.addTrack(VideoStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertTrue("m=video " in answer.sdp)
         self.assertTrue("m=application " in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue("m=video " in pc2.localDescription.sdp)
         self.assertTrue("m=application " in pc2.localDescription.sdp)
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # check a single transport is used
         self.assertBundled(pc1)
         self.assertBundled(pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -2335,8 +2177,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_audio_and_video_and_data_channel_ice_fail(self):
+    def test_connect_audio_and_video_and_data_channel_ice_fail(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -2357,23 +2198,23 @@ a=rtpmap:0 PCMU/8000
         pc1.addTrack(AudioStreamTrack())
         pc1.addTrack(VideoStreamTrack())
         pc1.createDataChannel("chat", protocol="bob")
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertTrue("m=video " in offer.sdp)
         self.assertTrue("m=application " in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0", "1", "2"])
 
         # close one side
         pc1_description = pc1.localDescription
-        await pc1.close()
+        run(pc1.close())
 
         # handle offer
-        await pc2.setRemoteDescription(pc1_description)
+        run(pc2.setRemoteDescription(pc1_description))
         self.assertEqual(pc2.remoteDescription, pc1_description)
         self.assertEqual(len(pc2.getReceivers()), 2)
         self.assertEqual(len(pc2.getSenders()), 2)
@@ -2383,14 +2224,15 @@ a=rtpmap:0 PCMU/8000
         # create answer
         pc2.addTrack(AudioStreamTrack())
         pc2.addTrack(VideoStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertTrue("m=video " in answer.sdp)
         self.assertTrue("m=application " in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue("m=video " in pc2.localDescription.sdp)
         self.assertTrue("m=application " in pc2.localDescription.sdp)
@@ -2402,13 +2244,13 @@ a=rtpmap:0 PCMU/8000
         def iceconnectionstatechange():
             done.set()
 
-        await done.wait()
+        run(done.wait())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "failed")
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -2436,8 +2278,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_audio_then_video(self):
+    def test_connect_audio_then_video(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -2458,18 +2299,18 @@ a=rtpmap:0 PCMU/8000
 
         # create offer
         pc1.addTrack(AudioStreamTrack())
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertFalse("m=video " in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -2478,22 +2319,24 @@ a=rtpmap:0 PCMU/8000
 
         # create answer
         pc2.addTrack(AudioStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertFalse("m=video " in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertFalse("m=video " in pc2.localDescription.sdp)
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # check a single transport is used
         self.assertBundled(pc1)
@@ -2503,18 +2346,18 @@ a=rtpmap:0 PCMU/8000
 
         # create offer
         pc1.addTrack(VideoStreamTrack())
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=audio " in offer.sdp)
         self.assertTrue("m=video " in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0", "1"])
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 2)
         self.assertEqual(len(pc2.getSenders()), 2)
@@ -2523,32 +2366,32 @@ a=rtpmap:0 PCMU/8000
 
         # create answer
         pc2.addTrack(VideoStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=audio " in answer.sdp)
         self.assertTrue("m=video " in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
+        run(pc2.setLocalDescription(answer))
         self.assertEqual(pc2.iceConnectionState, "completed")
         self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue("m=video " in pc2.localDescription.sdp)
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
         self.assertEqual(pc1.iceConnectionState, "completed")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # check a single transport is used
         self.assertBundled(pc1)
         self.assertBundled(pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -2601,10 +2444,7 @@ a=rtpmap:0 PCMU/8000
             ],
         )
 
-    @asynctest
-    async def test_connect_video_bidirectional(self):
-        VIDEO_SDP = VP8_SDP + H264_SDP
-
+    def test_connect_video_bidirectional(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -2623,24 +2463,49 @@ a=rtpmap:0 PCMU/8000
 
         # create offer
         pc1.addTrack(VideoStreamTrack())
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=video " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
         self.assertTrue("m=video " in pc1.localDescription.sdp)
-        self.assertTrue(VIDEO_SDP in pc1.localDescription.sdp)
+        self.assertTrue(
+            lf2crlf(
+                """a=rtpmap:97 VP8/90000
+a=rtcp-fb:97 nack
+a=rtcp-fb:97 nack pli
+a=rtcp-fb:97 goog-remb
+a=rtpmap:98 rtx/90000
+a=fmtp:98 apt=97
+a=rtpmap:99 H264/90000
+a=rtcp-fb:99 nack
+a=rtcp-fb:99 nack pli
+a=rtcp-fb:99 goog-remb
+a=fmtp:99 packetization-mode=1;level-asymmetry-allowed=1;profile-level-id=42001f
+a=rtpmap:100 rtx/90000
+a=fmtp:100 apt=99
+a=rtpmap:101 H264/90000
+a=rtcp-fb:101 nack
+a=rtcp-fb:101 nack pli
+a=rtcp-fb:101 goog-remb
+a=fmtp:101 packetization-mode=1;level-asymmetry-allowed=1;profile-level-id=42e01f
+a=rtpmap:102 rtx/90000
+a=fmtp:102 apt=101
+"""
+            )
+            in pc1.localDescription.sdp
+        )
         self.assertTrue("a=sendrecv" in pc1.localDescription.sdp)
         self.assertHasIceCandidates(pc1.localDescription)
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -2649,33 +2514,60 @@ a=rtpmap:0 PCMU/8000
 
         # create answer
         pc2.addTrack(VideoStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=video " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=video " in pc2.localDescription.sdp)
-        self.assertTrue(VIDEO_SDP in pc2.localDescription.sdp)
+        self.assertTrue(
+            lf2crlf(
+                """a=rtpmap:97 VP8/90000
+a=rtcp-fb:97 nack
+a=rtcp-fb:97 nack pli
+a=rtcp-fb:97 goog-remb
+a=rtpmap:98 rtx/90000
+a=fmtp:98 apt=97
+a=rtpmap:99 H264/90000
+a=rtcp-fb:99 nack
+a=rtcp-fb:99 nack pli
+a=rtcp-fb:99 goog-remb
+a=fmtp:99 packetization-mode=1;level-asymmetry-allowed=1;profile-level-id=42001f
+a=rtpmap:100 rtx/90000
+a=fmtp:100 apt=99
+a=rtpmap:101 H264/90000
+a=rtcp-fb:101 nack
+a=rtcp-fb:101 nack pli
+a=rtcp-fb:101 goog-remb
+a=fmtp:101 packetization-mode=1;level-asymmetry-allowed=1;profile-level-id=42e01f
+a=rtpmap:102 rtx/90000
+a=fmtp:102 apt=101
+"""
+            )
+            in pc2.localDescription.sdp
+        )
         self.assertTrue("a=sendrecv" in pc2.localDescription.sdp)
         self.assertHasIceCandidates(pc2.localDescription)
         self.assertHasDtls(pc2.localDescription, "active")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # let media flow to trigger RTCP feedback, including REMB
-        await asyncio.sleep(5)
+        run(asyncio.sleep(5))
 
         # check stats
-        report = await pc1.getStats()
-        self.assertIsInstance(report, RTCStatsReport)
+        report = run(pc1.getStats())
+        self.assertTrue(isinstance(report, RTCStatsReport))
         self.assertEqual(
             sorted([s.type for s in report.values()]),
             [
@@ -2688,8 +2580,8 @@ a=rtpmap:0 PCMU/8000
         )
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -2722,8 +2614,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_video_h264(self):
+    def test_connect_video_h264(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -2742,13 +2633,13 @@ a=rtpmap:0 PCMU/8000
 
         # create offer
         pc1.addTrack(VideoStreamTrack())
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=video " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -2766,7 +2657,7 @@ a=rtpmap:0 PCMU/8000
         self.assertTrue("H264" in desc1.sdp)
 
         # handle offer
-        await pc2.setRemoteDescription(desc1)
+        run(pc2.setRemoteDescription(desc1))
         self.assertEqual(pc2.remoteDescription, desc1)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -2775,29 +2666,31 @@ a=rtpmap:0 PCMU/8000
 
         # create answer
         pc2.addTrack(VideoStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=video " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=video " in pc2.localDescription.sdp)
         self.assertTrue("a=sendrecv" in pc2.localDescription.sdp)
         self.assertHasIceCandidates(pc2.localDescription)
         self.assertHasDtls(pc2.localDescription, "active")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -2830,8 +2723,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_video_no_ssrc(self):
+    def test_connect_video_no_ssrc(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -2850,13 +2742,13 @@ a=rtpmap:0 PCMU/8000
 
         # create offer
         pc1.addTrack(VideoStreamTrack())
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=video " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -2872,7 +2764,7 @@ a=rtpmap:0 PCMU/8000
         )
 
         # handle offer
-        await pc2.setRemoteDescription(mangled)
+        run(pc2.setRemoteDescription(mangled))
         self.assertEqual(pc2.remoteDescription, mangled)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -2881,29 +2773,31 @@ a=rtpmap:0 PCMU/8000
 
         # create answer
         pc2.addTrack(VideoStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=video " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=video " in pc2.localDescription.sdp)
         self.assertTrue("a=sendrecv" in pc2.localDescription.sdp)
         self.assertHasIceCandidates(pc2.localDescription)
         self.assertHasDtls(pc2.localDescription, "active")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -2936,10 +2830,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_video_codec_preferences_offerer(self):
-        VIDEO_SDP = H264_SDP + VP8_SDP
-
+    def test_connect_video_codec_preferences_offerer(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -2966,13 +2857,13 @@ a=rtpmap:0 PCMU/8000
         transceiver.setCodecPreferences(preferences)
 
         # create offer
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=video " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -2980,10 +2871,35 @@ a=rtpmap:0 PCMU/8000
         self.assertTrue("a=sendrecv" in pc1.localDescription.sdp)
         self.assertHasIceCandidates(pc1.localDescription)
         self.assertHasDtls(pc1.localDescription, "actpass")
-        self.assertTrue(VIDEO_SDP in pc1.localDescription.sdp)
+        self.assertTrue(
+            lf2crlf(
+                """a=rtpmap:99 H264/90000
+a=rtcp-fb:99 nack
+a=rtcp-fb:99 nack pli
+a=rtcp-fb:99 goog-remb
+a=fmtp:99 packetization-mode=1;level-asymmetry-allowed=1;profile-level-id=42001f
+a=rtpmap:100 rtx/90000
+a=fmtp:100 apt=99
+a=rtpmap:101 H264/90000
+a=rtcp-fb:101 nack
+a=rtcp-fb:101 nack pli
+a=rtcp-fb:101 goog-remb
+a=fmtp:101 packetization-mode=1;level-asymmetry-allowed=1;profile-level-id=42e01f
+a=rtpmap:102 rtx/90000
+a=fmtp:102 apt=101
+a=rtpmap:97 VP8/90000
+a=rtcp-fb:97 nack
+a=rtcp-fb:97 nack pli
+a=rtcp-fb:97 goog-remb
+a=rtpmap:98 rtx/90000
+a=fmtp:98 apt=97
+"""
+            )
+            in pc1.localDescription.sdp
+        )
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -2992,30 +2908,57 @@ a=rtpmap:0 PCMU/8000
 
         # create answer
         pc2.addTrack(VideoStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=video " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=video " in pc2.localDescription.sdp)
         self.assertTrue("a=sendrecv" in pc2.localDescription.sdp)
         self.assertHasIceCandidates(pc2.localDescription)
         self.assertHasDtls(pc2.localDescription, "active")
-        self.assertTrue(VIDEO_SDP in pc2.localDescription.sdp)
+        self.assertTrue(
+            lf2crlf(
+                """a=rtpmap:99 H264/90000
+a=rtcp-fb:99 nack
+a=rtcp-fb:99 nack pli
+a=rtcp-fb:99 goog-remb
+a=fmtp:99 packetization-mode=1;level-asymmetry-allowed=1;profile-level-id=42001f
+a=rtpmap:100 rtx/90000
+a=fmtp:100 apt=99
+a=rtpmap:101 H264/90000
+a=rtcp-fb:101 nack
+a=rtcp-fb:101 nack pli
+a=rtcp-fb:101 goog-remb
+a=fmtp:101 packetization-mode=1;level-asymmetry-allowed=1;profile-level-id=42e01f
+a=rtpmap:102 rtx/90000
+a=fmtp:102 apt=101
+a=rtpmap:97 VP8/90000
+a=rtcp-fb:97 nack
+a=rtcp-fb:97 nack pli
+a=rtcp-fb:97 goog-remb
+a=rtpmap:98 rtx/90000
+a=fmtp:98 apt=97
+"""
+            )
+            in pc2.localDescription.sdp
+        )
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -3048,8 +2991,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_video_codec_preferences_offerer_only_h264(self):
+    def test_connect_video_codec_preferences_offerer_only_h264(self):
         pc1 = RTCPeerConnection()
         pc1_states = track_states(pc1)
 
@@ -3075,13 +3017,13 @@ a=rtpmap:0 PCMU/8000
         transceiver.setCodecPreferences(preferences)
 
         # create offer
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=video " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -3092,7 +3034,7 @@ a=rtpmap:0 PCMU/8000
         self.assertFalse("VP8" in pc1.localDescription.sdp)
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -3101,14 +3043,15 @@ a=rtpmap:0 PCMU/8000
 
         # create answer
         pc2.addTrack(VideoStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=video " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=video " in pc2.localDescription.sdp)
         self.assertTrue("a=sendrecv" in pc2.localDescription.sdp)
         self.assertHasIceCandidates(pc2.localDescription)
@@ -3116,15 +3059,16 @@ a=rtpmap:0 PCMU/8000
         self.assertFalse("VP8" in pc2.localDescription.sdp)
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -3157,8 +3101,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_datachannel_and_close_immediately(self):
+    def test_connect_datachannel_and_close_immediately(self):
         pc1 = RTCPeerConnection()
         pc2 = RTCPeerConnection()
 
@@ -3174,24 +3117,23 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(dc2.readyState, "connecting")
 
         # perform SDP exchange
-        await pc1.setLocalDescription(await pc1.createOffer())
-        await pc2.setRemoteDescription(pc1.localDescription)
-        await pc2.setLocalDescription(await pc2.createAnswer())
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setLocalDescription(run(pc1.createOffer())))
+        run(pc2.setRemoteDescription(pc1.localDescription))
+        run(pc2.setLocalDescription(run(pc2.createAnswer())))
+        run(pc1.setRemoteDescription(pc2.localDescription))
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
         self.assertEqual(dc1.readyState, "closed")
-        await self.assertDataChannelOpen(dc2)
+        self.assertDataChannelOpen(dc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
-    @asynctest
-    async def test_connect_datachannel_negotiated_and_close_immediately(self):
+    def test_connect_datachannel_negotiated_and_close_immediately(self):
         pc1 = RTCPeerConnection()
         pc2 = RTCPeerConnection()
 
@@ -3207,24 +3149,23 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(dc2.readyState, "connecting")
 
         # perform SDP exchange
-        await pc1.setLocalDescription(await pc1.createOffer())
-        await pc2.setRemoteDescription(pc1.localDescription)
-        await pc2.setLocalDescription(await pc2.createAnswer())
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setLocalDescription(run(pc1.createOffer())))
+        run(pc2.setRemoteDescription(pc1.localDescription))
+        run(pc2.setLocalDescription(run(pc2.createAnswer())))
+        run(pc1.setRemoteDescription(pc2.localDescription))
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
         self.assertEqual(dc1.readyState, "closed")
-        await self.assertDataChannelOpen(dc2)
+        self.assertDataChannelOpen(dc2)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
-    @asynctest
-    async def test_connect_datachannel_legacy_sdp(self):
+    def test_connect_datachannel_legacy_sdp(self):
         pc1 = RTCPeerConnection()
         pc1._sctpLegacySdp = True
         pc1_data_messages = []
@@ -3277,13 +3218,13 @@ a=rtpmap:0 PCMU/8000
             pc1_data_messages.append(message)
 
         # create offer
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=application " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -3295,7 +3236,7 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 0)
         self.assertEqual(len(pc2.getSenders()), 0)
@@ -3303,14 +3244,15 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(mids(pc2), ["0"])
 
         # create answer
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=application " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=application " in pc2.localDescription.sdp)
         self.assertTrue(
             "a=sctpmap:5000 webrtc-datachannel 65535" in pc2.localDescription.sdp
@@ -3319,12 +3261,13 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc2.localDescription, "active")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
-        await self.assertDataChannelOpen(dc)
+        self.assertIceCompleted(pc1, pc2)
+        self.assertDataChannelOpen(dc)
         self.assertEqual(dc.bufferedAmount, 0)
 
         # check pc2 got a datachannel
@@ -3336,7 +3279,7 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(pc2_data_channels[0].protocol, "bob")
 
         # check pc2 got messages
-        await asyncio.sleep(0.1)
+        run(asyncio.sleep(0.1))
         self.assertEqual(
             pc2_data_messages, ["hello", "", b"\x00\x01\x02\x03", b"", LONG_DATA]
         )
@@ -3354,11 +3297,11 @@ a=rtpmap:0 PCMU/8000
         )
 
         # close data channel
-        await self.closeDataChannel(dc)
+        self.closeDataChannel(dc)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -3391,8 +3334,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_datachannel_modern_sdp(self):
+    def test_connect_datachannel_modern_sdp(self):
         pc1 = RTCPeerConnection()
         pc1._sctpLegacySdp = False
         pc1_data_messages = []
@@ -3444,13 +3386,13 @@ a=rtpmap:0 PCMU/8000
             pc1_data_messages.append(message)
 
         # create offer
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=application " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -3460,7 +3402,7 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 0)
         self.assertEqual(len(pc2.getSenders()), 0)
@@ -3468,26 +3410,28 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(mids(pc2), ["0"])
 
         # create answer
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=application " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=application " in pc2.localDescription.sdp)
         self.assertTrue("a=sctp-port:5000" in pc2.localDescription.sdp)
         self.assertHasIceCandidates(pc2.localDescription)
         self.assertHasDtls(pc2.localDescription, "active")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
-        await self.assertDataChannelOpen(dc)
+        self.assertIceCompleted(pc1, pc2)
+        self.assertDataChannelOpen(dc)
 
         # check pc2 got a datachannel
         self.assertEqual(len(pc2_data_channels), 1)
@@ -3498,7 +3442,7 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(pc2_data_channels[0].protocol, "bob")
 
         # check pc2 got messages
-        await asyncio.sleep(0.1)
+        run(asyncio.sleep(0.1))
         self.assertEqual(
             pc2_data_messages, ["hello", "", b"\x00\x01\x02\x03", b"", LONG_DATA]
         )
@@ -3516,11 +3460,11 @@ a=rtpmap:0 PCMU/8000
         )
 
         # close data channel
-        await self.closeDataChannel(dc)
+        self.closeDataChannel(dc)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -3553,8 +3497,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_datachannel_modern_sdp_negotiated(self):
+    def test_connect_datachannel_modern_sdp_negotiated(self):
         pc1 = RTCPeerConnection()
         pc1._sctpLegacySdp = False
         pc1_data_messages = []
@@ -3596,13 +3539,13 @@ a=rtpmap:0 PCMU/8000
                 dc2.send(b"binary-echo: " + message)
 
         # create offer
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=application " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -3612,7 +3555,7 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 0)
         self.assertEqual(len(pc2.getSenders()), 0)
@@ -3620,27 +3563,29 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(mids(pc2), ["0"])
 
         # create answer
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=application " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=application " in pc2.localDescription.sdp)
         self.assertTrue("a=sctp-port:5000" in pc2.localDescription.sdp)
         self.assertHasIceCandidates(pc2.localDescription)
         self.assertHasDtls(pc2.localDescription, "active")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
-        await self.assertDataChannelOpen(dc1)
-        await self.assertDataChannelOpen(dc2)
+        self.assertIceCompleted(pc1, pc2)
+        self.assertDataChannelOpen(dc1)
+        self.assertDataChannelOpen(dc2)
 
         # send message
         dc1.send("hello")
@@ -3655,7 +3600,7 @@ a=rtpmap:0 PCMU/8000
         )
 
         # check pc2 got messages
-        await asyncio.sleep(0.1)
+        run(asyncio.sleep(0.1))
         self.assertEqual(
             pc2_data_messages, ["hello", "", b"\x00\x01\x02\x03", b"", LONG_DATA]
         )
@@ -3673,11 +3618,11 @@ a=rtpmap:0 PCMU/8000
         )
 
         # close data channels
-        await self.closeDataChannel(dc1)
+        self.closeDataChannel(dc1)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -3710,8 +3655,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_datachannel_recycle_stream_id(self):
+    def test_connect_datachannel_recycle_stream_id(self):
         pc1 = RTCPeerConnection()
         pc2 = RTCPeerConnection()
 
@@ -3724,31 +3668,31 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(dc3.readyState, "connecting")
 
         # perform SDP exchange
-        await pc1.setLocalDescription(await pc1.createOffer())
-        await pc2.setRemoteDescription(pc1.localDescription)
-        await pc2.setLocalDescription(await pc2.createAnswer())
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setLocalDescription(run(pc1.createOffer())))
+        run(pc2.setRemoteDescription(pc1.localDescription))
+        run(pc2.setLocalDescription(run(pc2.createAnswer())))
+        run(pc1.setRemoteDescription(pc2.localDescription))
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
-        await self.assertDataChannelOpen(dc1)
+        self.assertIceCompleted(pc1, pc2)
+        self.assertDataChannelOpen(dc1)
         self.assertEqual(dc1.id, 1)
-        await self.assertDataChannelOpen(dc2)
+        self.assertDataChannelOpen(dc2)
         self.assertEqual(dc2.id, 3)
-        await self.assertDataChannelOpen(dc3)
+        self.assertDataChannelOpen(dc3)
         self.assertEqual(dc3.id, 5)
 
         # close one data channel
-        await self.closeDataChannel(dc2)
+        self.closeDataChannel(dc2)
 
         # create a new data channel
         dc4 = pc1.createDataChannel("chat4")
-        await self.assertDataChannelOpen(dc4)
+        self.assertDataChannelOpen(dc4)
         self.assertEqual(dc4.id, 3)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -3761,8 +3705,7 @@ a=rtpmap:0 PCMU/8000
             "Cannot specify both maxPacketLifeTime and maxRetransmits",
         )
 
-    @asynctest
-    async def test_datachannel_bufferedamountlowthreshold(self):
+    def test_datachannel_bufferedamountlowthreshold(self):
         pc = RTCPeerConnection()
         dc = pc.createDataChannel("chat")
         self.assertEqual(dc.bufferedAmountLowThreshold, 0)
@@ -3784,15 +3727,13 @@ a=rtpmap:0 PCMU/8000
             dc.bufferedAmountLowThreshold = 4294967296
             self.assertEqual(dc.bufferedAmountLowThreshold, 0)
 
-    @asynctest
-    async def test_datachannel_send_invalid_state(self):
+    def test_datachannel_send_invalid_state(self):
         pc = RTCPeerConnection()
         dc = pc.createDataChannel("chat")
         with self.assertRaises(InvalidStateError):
             dc.send("hello")
 
-    @asynctest
-    async def test_connect_datachannel_then_audio(self):
+    def test_connect_datachannel_then_audio(self):
         pc1 = RTCPeerConnection()
         pc1_data_messages = []
         pc1_states = track_states(pc1)
@@ -3845,13 +3786,13 @@ a=rtpmap:0 PCMU/8000
         # 1. DATA CHANNEL ONLY
 
         # create offer
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=application " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -3860,7 +3801,7 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 0)
         self.assertEqual(len(pc2.getSenders()), 0)
@@ -3868,25 +3809,27 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(mids(pc2), ["0"])
 
         # create answer
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=application " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=application " in pc2.localDescription.sdp)
         self.assertHasIceCandidates(pc2.localDescription)
         self.assertHasDtls(pc2.localDescription, "active")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
-        await self.assertDataChannelOpen(dc)
+        self.assertIceCompleted(pc1, pc2)
+        self.assertDataChannelOpen(dc)
 
         # check pc2 got a datachannel
         self.assertEqual(len(pc2_data_channels), 1)
@@ -3897,7 +3840,7 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(pc2_data_channels[0].protocol, "bob")
 
         # check pc2 got messages
-        await asyncio.sleep(0.1)
+        run(asyncio.sleep(0.1))
         self.assertEqual(
             pc2_data_messages, ["hello", "", b"\x00\x01\x02\x03", b"", LONG_DATA]
         )
@@ -3918,18 +3861,18 @@ a=rtpmap:0 PCMU/8000
 
         # create offer
         pc1.addTrack(AudioStreamTrack())
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=application " in offer.sdp)
         self.assertTrue("m=audio " in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0", "1"])
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -3938,24 +3881,24 @@ a=rtpmap:0 PCMU/8000
 
         # create answer
         pc2.addTrack(AudioStreamTrack())
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=application " in answer.sdp)
         self.assertTrue("m=audio " in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
+        run(pc2.setLocalDescription(answer))
         self.assertEqual(pc2.iceConnectionState, "completed")
         self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=application " in pc2.localDescription.sdp)
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
         self.assertEqual(pc1.iceConnectionState, "completed")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         # check a single transport is used
         self.assertBundled(pc1)
@@ -3964,11 +3907,11 @@ a=rtpmap:0 PCMU/8000
         # 3. CLEANUP
 
         # close data channel
-        await self.closeDataChannel(dc)
+        self.closeDataChannel(dc)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -4021,8 +3964,7 @@ a=rtpmap:0 PCMU/8000
             ],
         )
 
-    @asynctest
-    async def test_connect_datachannel_trickle(self):
+    def test_connect_datachannel_trickle(self):
         pc1 = RTCPeerConnection()
         pc1_data_messages = []
         pc1_states = track_states(pc1)
@@ -4073,13 +4015,13 @@ a=rtpmap:0 PCMU/8000
             pc1_data_messages.append(message)
 
         # create offer
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=application " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -4091,7 +4033,7 @@ a=rtpmap:0 PCMU/8000
         desc1 = strip_ice_candidates(pc1.localDescription)
 
         # handle offer
-        await pc2.setRemoteDescription(desc1)
+        run(pc2.setRemoteDescription(desc1))
         self.assertEqual(pc2.remoteDescription, desc1)
         self.assertEqual(len(pc2.getReceivers()), 0)
         self.assertEqual(len(pc2.getSenders()), 0)
@@ -4099,14 +4041,15 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(mids(pc2), ["0"])
 
         # create answer
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=application " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=application " in pc2.localDescription.sdp)
         self.assertHasIceCandidates(pc2.localDescription)
         self.assertHasDtls(pc2.localDescription, "active")
@@ -4115,20 +4058,21 @@ a=rtpmap:0 PCMU/8000
         desc2 = strip_ice_candidates(pc2.localDescription)
 
         # handle answer
-        await pc1.setRemoteDescription(desc2)
+        run(pc1.setRemoteDescription(desc2))
         self.assertEqual(pc1.remoteDescription, desc2)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # trickle candidates
         for candidate in pc2.sctp.transport.transport.iceGatherer.getLocalCandidates():
             candidate.sdpMid = pc2.sctp.mid
-            await pc1.addIceCandidate(candidate)
+            run(pc1.addIceCandidate(candidate))
         for candidate in pc1.sctp.transport.transport.iceGatherer.getLocalCandidates():
             candidate.sdpMid = pc1.sctp.mid
-            await pc2.addIceCandidate(candidate)
+            run(pc2.addIceCandidate(candidate))
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
-        await self.assertDataChannelOpen(dc)
+        self.assertIceCompleted(pc1, pc2)
+        self.assertDataChannelOpen(dc)
 
         # check pc2 got a datachannel
         self.assertEqual(len(pc2_data_channels), 1)
@@ -4139,7 +4083,7 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(pc2_data_channels[0].protocol, "bob")
 
         # check pc2 got messages
-        await asyncio.sleep(0.1)
+        run(asyncio.sleep(0.1))
         self.assertEqual(
             pc2_data_messages, ["hello", "", b"\x00\x01\x02\x03", b"", LONG_DATA]
         )
@@ -4157,11 +4101,11 @@ a=rtpmap:0 PCMU/8000
         )
 
         # close data channel
-        await self.closeDataChannel(dc)
+        self.closeDataChannel(dc)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -4194,8 +4138,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_datachannel_max_packet_lifetime(self):
+    def test_connect_datachannel_max_packet_lifetime(self):
         pc1 = RTCPeerConnection()
         pc1_data_messages = []
         pc1_states = track_states(pc1)
@@ -4234,18 +4177,18 @@ a=rtpmap:0 PCMU/8000
             pc1_data_messages.append(message)
 
         # create offer
-        offer = await pc1.createOffer()
-        await pc1.setLocalDescription(offer)
-        await pc2.setRemoteDescription(pc1.localDescription)
+        offer = run(pc1.createOffer())
+        run(pc1.setLocalDescription(offer))
+        run(pc2.setRemoteDescription(pc1.localDescription))
 
         # create answer
-        answer = await pc2.createAnswer()
-        await pc2.setLocalDescription(answer)
-        await pc1.setRemoteDescription(pc2.localDescription)
+        answer = run(pc2.createAnswer())
+        run(pc2.setLocalDescription(answer))
+        run(pc1.setRemoteDescription(pc2.localDescription))
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
-        await self.assertDataChannelOpen(dc)
+        self.assertIceCompleted(pc1, pc2)
+        self.assertDataChannelOpen(dc)
 
         # check pc2 got a datachannel
         self.assertEqual(len(pc2_data_channels), 1)
@@ -4256,18 +4199,18 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(pc2_data_channels[0].protocol, "bob")
 
         # check pc2 got message
-        await asyncio.sleep(0.1)
+        run(asyncio.sleep(0.1))
         self.assertEqual(pc2_data_messages, ["hello"])
 
         # check pc1 got replies
         self.assertEqual(pc1_data_messages, ["string-echo: hello"])
 
         # close data channel
-        await self.closeDataChannel(dc)
+        self.closeDataChannel(dc)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -4300,8 +4243,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_datachannel_max_retransmits(self):
+    def test_connect_datachannel_max_retransmits(self):
         pc1 = RTCPeerConnection()
         pc1_data_messages = []
         pc1_states = track_states(pc1)
@@ -4340,18 +4282,18 @@ a=rtpmap:0 PCMU/8000
             pc1_data_messages.append(message)
 
         # create offer
-        offer = await pc1.createOffer()
-        await pc1.setLocalDescription(offer)
-        await pc2.setRemoteDescription(pc1.localDescription)
+        offer = run(pc1.createOffer())
+        run(pc1.setLocalDescription(offer))
+        run(pc2.setRemoteDescription(pc1.localDescription))
 
         # create answer
-        answer = await pc2.createAnswer()
-        await pc2.setLocalDescription(answer)
-        await pc1.setRemoteDescription(pc2.localDescription)
+        answer = run(pc2.createAnswer())
+        run(pc2.setLocalDescription(answer))
+        run(pc1.setRemoteDescription(pc2.localDescription))
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
-        await self.assertDataChannelOpen(dc)
+        self.assertIceCompleted(pc1, pc2)
+        self.assertDataChannelOpen(dc)
 
         # check pc2 got a datachannel
         self.assertEqual(len(pc2_data_channels), 1)
@@ -4362,18 +4304,18 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(pc2_data_channels[0].protocol, "bob")
 
         # check pc2 got message
-        await asyncio.sleep(0.1)
+        run(asyncio.sleep(0.1))
         self.assertEqual(pc2_data_messages, ["hello"])
 
         # check pc1 got replies
         self.assertEqual(pc1_data_messages, ["string-echo: hello"])
 
         # close data channel
-        await self.closeDataChannel(dc)
+        self.closeDataChannel(dc)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -4406,8 +4348,7 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_connect_datachannel_unordered(self):
+    def test_connect_datachannel_unordered(self):
         pc1 = RTCPeerConnection()
         pc1_data_messages = []
         pc1_states = track_states(pc1)
@@ -4446,13 +4387,13 @@ a=rtpmap:0 PCMU/8000
             pc1_data_messages.append(message)
 
         # create offer
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
         self.assertTrue("m=application " in offer.sdp)
         self.assertFalse("a=candidate:" in offer.sdp)
         self.assertFalse("a=end-of-candidates" in offer.sdp)
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0"])
@@ -4461,7 +4402,7 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 0)
         self.assertEqual(len(pc2.getSenders()), 0)
@@ -4469,25 +4410,27 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(mids(pc2), ["0"])
 
         # create answer
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("m=application " in answer.sdp)
         self.assertFalse("a=candidate:" in answer.sdp)
         self.assertFalse("a=end-of-candidates" in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertTrue("m=application " in pc2.localDescription.sdp)
         self.assertHasIceCandidates(pc2.localDescription)
         self.assertHasDtls(pc2.localDescription, "active")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
-        await self.assertDataChannelOpen(dc)
+        self.assertIceCompleted(pc1, pc2)
+        self.assertDataChannelOpen(dc)
 
         # check pc2 got a datachannel
         self.assertEqual(len(pc2_data_channels), 1)
@@ -4498,18 +4441,18 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(pc2_data_channels[0].protocol, "bob")
 
         # check pc2 got message
-        await asyncio.sleep(0.1)
+        run(asyncio.sleep(0.1))
         self.assertEqual(pc2_data_messages, ["hello"])
 
         # check pc1 got replies
         self.assertEqual(pc1_data_messages, ["string-echo: hello"])
 
         # close data channel
-        await self.closeDataChannel(dc)
+        self.closeDataChannel(dc)
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 
@@ -4542,89 +4485,82 @@ a=rtpmap:0 PCMU/8000
             ["stable", "have-remote-offer", "stable", "closed"],
         )
 
-    @asynctest
-    async def test_createAnswer_closed(self):
+    def test_createAnswer_closed(self):
         pc = RTCPeerConnection()
-        await pc.close()
+        run(pc.close())
         with self.assertRaises(InvalidStateError) as cm:
-            await pc.createAnswer()
+            run(pc.createAnswer())
         self.assertEqual(str(cm.exception), "RTCPeerConnection is closed")
 
-    @asynctest
-    async def test_createAnswer_without_offer(self):
+    def test_createAnswer_without_offer(self):
         pc = RTCPeerConnection()
         with self.assertRaises(InvalidStateError) as cm:
-            await pc.createAnswer()
+            run(pc.createAnswer())
         self.assertEqual(
             str(cm.exception), 'Cannot create answer in signaling state "stable"'
         )
 
-    @asynctest
-    async def test_createOffer_closed(self):
+    def test_createOffer_closed(self):
         pc = RTCPeerConnection()
-        await pc.close()
+        run(pc.close())
         with self.assertRaises(InvalidStateError) as cm:
-            await pc.createOffer()
+            run(pc.createOffer())
         self.assertEqual(str(cm.exception), "RTCPeerConnection is closed")
 
-    @asynctest
-    async def test_createOffer_without_media(self):
+    def test_createOffer_without_media(self):
         pc = RTCPeerConnection()
         with self.assertRaises(InternalError) as cm:
-            await pc.createOffer()
+            run(pc.createOffer())
         self.assertEqual(
             str(cm.exception),
             "Cannot create an offer with no media and no data channels",
         )
 
         # close
-        await pc.close()
+        run(pc.close())
 
-    @asynctest
-    async def test_setLocalDescription_unexpected_answer(self):
+    def test_setLocalDescription_unexpected_answer(self):
         pc = RTCPeerConnection()
         pc.addTrack(AudioStreamTrack())
-        answer = await pc.createOffer()
+        answer = run(pc.createOffer())
         answer.type = "answer"
         with self.assertRaises(InvalidStateError) as cm:
-            await pc.setLocalDescription(answer)
+            run(pc.setLocalDescription(answer))
         self.assertEqual(
             str(cm.exception), 'Cannot handle answer in signaling state "stable"'
         )
 
         # close
-        await pc.close()
+        run(pc.close())
 
-    @asynctest
-    async def test_setLocalDescription_unexpected_offer(self):
+    def test_setLocalDescription_unexpected_offer(self):
         pc1 = RTCPeerConnection()
         pc2 = RTCPeerConnection()
 
         # apply offer
         pc1.addTrack(AudioStreamTrack())
-        await pc1.setLocalDescription(await pc1.createOffer())
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc1.setLocalDescription(run(pc1.createOffer())))
+        run(pc2.setRemoteDescription(pc1.localDescription))
 
         # mangle answer into an offer
         offer = pc2.remoteDescription
         offer.type = "offer"
         with self.assertRaises(InvalidStateError) as cm:
-            await pc2.setLocalDescription(offer)
+            run(pc2.setLocalDescription(offer))
         self.assertEqual(
             str(cm.exception),
             'Cannot handle offer in signaling state "have-remote-offer"',
         )
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
 
-    @asynctest
-    async def test_setRemoteDescription_no_common_audio(self):
+    def test_setRemoteDescription_no_common_audio(self):
         pc1 = RTCPeerConnection()
         pc2 = RTCPeerConnection()
         pc1.addTrack(AudioStreamTrack())
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
 
         mangled_sdp = []
         for line in offer.sdp.split("\n"):
@@ -4635,125 +4571,120 @@ a=rtpmap:0 PCMU/8000
         mangled = RTCSessionDescription(sdp="\n".join(mangled_sdp), type=offer.type)
 
         with self.assertRaises(OperationError) as cm:
-            await pc2.setRemoteDescription(mangled)
+            run(pc2.setRemoteDescription(mangled))
         self.assertEqual(
             str(cm.exception), "Failed to set remote audio description send parameters"
         )
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
 
-    @asynctest
-    async def test_setRemoteDescription_no_common_video(self):
+    def test_setRemoteDescription_no_common_video(self):
         pc1 = RTCPeerConnection()
         pc2 = RTCPeerConnection()
         pc1.addTrack(VideoStreamTrack())
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
 
         mangled = RTCSessionDescription(
             sdp=offer.sdp.replace("90000", "92000"),
             type=offer.type,
         )
         with self.assertRaises(OperationError) as cm:
-            await pc2.setRemoteDescription(mangled)
+            run(pc2.setRemoteDescription(mangled))
         self.assertEqual(
             str(cm.exception), "Failed to set remote video description send parameters"
         )
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
 
-    @asynctest
-    async def test_setRemoteDescription_media_mismatch(self):
+    def test_setRemoteDescription_media_mismatch(self):
         pc1 = RTCPeerConnection()
         pc2 = RTCPeerConnection()
 
         # apply offer
         pc1.addTrack(AudioStreamTrack())
-        offer = await pc1.createOffer()
-        await pc1.setLocalDescription(offer)
-        await pc2.setRemoteDescription(pc1.localDescription)
+        offer = run(pc1.createOffer())
+        run(pc1.setLocalDescription(offer))
+        run(pc2.setRemoteDescription(pc1.localDescription))
 
         # apply answer
-        answer = await pc2.createAnswer()
-        await pc2.setLocalDescription(answer)
+        answer = run(pc2.createAnswer())
+        run(pc2.setLocalDescription(answer))
         mangled = RTCSessionDescription(
             sdp=pc2.localDescription.sdp.replace("m=audio", "m=video"),
             type=pc2.localDescription.type,
         )
         with self.assertRaises(ValueError) as cm:
-            await pc1.setRemoteDescription(mangled)
+            run(pc1.setRemoteDescription(mangled))
         self.assertEqual(
             str(cm.exception), "Media sections in answer do not match offer"
         )
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
 
-    @asynctest
-    async def test_setRemoteDescription_with_invalid_dtls_setup_for_offer(self):
+    def test_setRemoteDescription_with_invalid_dtls_setup_for_offer(self):
         pc1 = RTCPeerConnection()
         pc2 = RTCPeerConnection()
 
         # apply offer
         pc1.addTrack(AudioStreamTrack())
-        offer = await pc1.createOffer()
-        await pc1.setLocalDescription(offer)
+        offer = run(pc1.createOffer())
+        run(pc1.setLocalDescription(offer))
         mangled = RTCSessionDescription(
             sdp=pc1.localDescription.sdp.replace("a=setup:actpass", "a=setup:active"),
             type=pc1.localDescription.type,
         )
         with self.assertRaises(ValueError) as cm:
-            await pc2.setRemoteDescription(mangled)
+            run(pc2.setRemoteDescription(mangled))
         self.assertEqual(
             str(cm.exception),
             "DTLS setup attribute must be 'actpass' for an offer",
         )
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
 
-    @asynctest
-    async def test_setRemoteDescription_with_invalid_dtls_setup_for_answer(self):
+    def test_setRemoteDescription_with_invalid_dtls_setup_for_answer(self):
         pc1 = RTCPeerConnection()
         pc2 = RTCPeerConnection()
 
         # apply offer
         pc1.addTrack(AudioStreamTrack())
-        offer = await pc1.createOffer()
-        await pc1.setLocalDescription(offer)
-        await pc2.setRemoteDescription(pc1.localDescription)
+        offer = run(pc1.createOffer())
+        run(pc1.setLocalDescription(offer))
+        run(pc2.setRemoteDescription(pc1.localDescription))
 
         # apply answer
-        answer = await pc2.createAnswer()
-        await pc2.setLocalDescription(answer)
+        answer = run(pc2.createAnswer())
+        run(pc2.setLocalDescription(answer))
         mangled = RTCSessionDescription(
             sdp=pc2.localDescription.sdp.replace("a=setup:active", "a=setup:actpass"),
             type=pc2.localDescription.type,
         )
         with self.assertRaises(ValueError) as cm:
-            await pc1.setRemoteDescription(mangled)
+            run(pc1.setRemoteDescription(mangled))
         self.assertEqual(
             str(cm.exception),
             "DTLS setup attribute must be 'active' or 'passive' for an answer",
         )
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
 
-    @asynctest
-    async def test_setRemoteDescription_without_ice_credentials(self):
+    def test_setRemoteDescription_without_ice_credentials(self):
         pc1 = RTCPeerConnection()
         pc2 = RTCPeerConnection()
 
         pc1.addTrack(AudioStreamTrack())
-        offer = await pc1.createOffer()
-        await pc1.setLocalDescription(offer)
+        offer = run(pc1.createOffer())
+        run(pc1.setLocalDescription(offer))
 
         mangled = RTCSessionDescription(
             sdp=re.sub(
@@ -4765,66 +4696,62 @@ a=rtpmap:0 PCMU/8000
             type=pc1.localDescription.type,
         )
         with self.assertRaises(ValueError) as cm:
-            await pc2.setRemoteDescription(mangled)
+            run(pc2.setRemoteDescription(mangled))
         self.assertEqual(
             str(cm.exception), "ICE username fragment or password is missing"
         )
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
 
-    @asynctest
-    async def test_setRemoteDescription_without_rtcp_mux(self):
+    def test_setRemoteDescription_without_rtcp_mux(self):
         pc1 = RTCPeerConnection()
         pc2 = RTCPeerConnection()
 
         pc1.addTrack(AudioStreamTrack())
-        offer = await pc1.createOffer()
-        await pc1.setLocalDescription(offer)
+        offer = run(pc1.createOffer())
+        run(pc1.setLocalDescription(offer))
 
         mangled = RTCSessionDescription(
             sdp=re.sub("^a=rtcp-mux\r\n", "", pc1.localDescription.sdp, flags=re.M),
             type=pc1.localDescription.type,
         )
         with self.assertRaises(ValueError) as cm:
-            await pc2.setRemoteDescription(mangled)
+            run(pc2.setRemoteDescription(mangled))
         self.assertEqual(str(cm.exception), "RTCP mux is not enabled")
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
 
-    @asynctest
-    async def test_setRemoteDescription_unexpected_answer(self):
+    def test_setRemoteDescription_unexpected_answer(self):
         pc = RTCPeerConnection()
         with self.assertRaises(InvalidStateError) as cm:
-            await pc.setRemoteDescription(RTCSessionDescription(sdp="", type="answer"))
+            run(pc.setRemoteDescription(RTCSessionDescription(sdp="", type="answer")))
         self.assertEqual(
             str(cm.exception), 'Cannot handle answer in signaling state "stable"'
         )
 
         # close
-        await pc.close()
+        run(pc.close())
 
-    @asynctest
-    async def test_setRemoteDescription_unexpected_offer(self):
+    def test_setRemoteDescription_unexpected_offer(self):
         pc = RTCPeerConnection()
         pc.addTrack(AudioStreamTrack())
-        offer = await pc.createOffer()
-        await pc.setLocalDescription(offer)
+        offer = run(pc.createOffer())
+        run(pc.setLocalDescription(offer))
         with self.assertRaises(InvalidStateError) as cm:
-            await pc.setRemoteDescription(RTCSessionDescription(sdp="", type="offer"))
+            run(pc.setRemoteDescription(RTCSessionDescription(sdp="", type="offer")))
         self.assertEqual(
             str(cm.exception),
             'Cannot handle offer in signaling state "have-local-offer"',
         )
 
         # close
-        await pc.close()
+        run(pc.close())
 
-    @asynctest
-    async def test_setRemoteDescription_media_datachannel_bundled(self):
+    def test_setRemoteDescription_media_datachannel_bundled(self):
         pc1 = RTCPeerConnection()
         pc2 = RTCPeerConnection()
 
@@ -4848,10 +4775,10 @@ a=rtpmap:0 PCMU/8000
         # create offer
         pc1.addTrack(AudioStreamTrack())
         pc1.createDataChannel("chat", protocol="")
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "new")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0", "1"])
@@ -4859,7 +4786,7 @@ a=rtpmap:0 PCMU/8000
         self.assertTrue("m=audio " in pc1.localDescription.sdp)
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -4867,35 +4794,37 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(mids(pc2), ["0", "1"])
 
         # create answer
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("a=group:BUNDLE 0 1" in answer.sdp)
         self.assertTrue("m=audio " in answer.sdp)
         self.assertTrue("m=application " in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
-        await self.assertIceChecking(pc2)
+        run(pc2.setLocalDescription(answer))
+        self.assertEqual(pc2.iceConnectionState, "checking")
+        self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertEqual(mids(pc2), ["0", "1"])
         self.assertTrue("a=group:BUNDLE 0 1" in pc2.localDescription.sdp)
         self.assertTrue("m=audio " in pc2.localDescription.sdp)
         self.assertTrue("m=application " in pc2.localDescription.sdp)
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
+        self.assertEqual(pc1.iceConnectionState, "checking")
 
         # check outcome
-        await self.assertIceCompleted(pc1, pc2)
+        self.assertIceCompleted(pc1, pc2)
 
         """
         renegotiation
         """
 
         # create offer
-        offer = await pc1.createOffer()
+        offer = run(pc1.createOffer())
         self.assertEqual(offer.type, "offer")
 
-        await pc1.setLocalDescription(offer)
+        run(pc1.setLocalDescription(offer))
         self.assertEqual(pc1.iceConnectionState, "completed")
         self.assertEqual(pc1.iceGatheringState, "complete")
         self.assertEqual(mids(pc1), ["0", "1"])
@@ -4905,7 +4834,7 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc1.localDescription, "actpass")
 
         # handle offer
-        await pc2.setRemoteDescription(pc1.localDescription)
+        run(pc2.setRemoteDescription(pc1.localDescription))
         self.assertEqual(pc2.remoteDescription, pc1.localDescription)
         self.assertEqual(len(pc2.getReceivers()), 1)
         self.assertEqual(len(pc2.getSenders()), 1)
@@ -4913,13 +4842,13 @@ a=rtpmap:0 PCMU/8000
         self.assertEqual(mids(pc2), ["0", "1"])
 
         # create answer
-        answer = await pc2.createAnswer()
+        answer = run(pc2.createAnswer())
         self.assertEqual(answer.type, "answer")
         self.assertTrue("a=group:BUNDLE 0 1" in answer.sdp)
         self.assertTrue("m=audio " in answer.sdp)
         self.assertTrue("m=application " in answer.sdp)
 
-        await pc2.setLocalDescription(answer)
+        run(pc2.setLocalDescription(answer))
         self.assertEqual(pc2.iceConnectionState, "completed")
         self.assertEqual(pc2.iceGatheringState, "complete")
         self.assertEqual(mids(pc2), ["0", "1"])
@@ -4929,16 +4858,16 @@ a=rtpmap:0 PCMU/8000
         self.assertHasDtls(pc2.localDescription, "active")
 
         # handle answer
-        await pc1.setRemoteDescription(pc2.localDescription)
+        run(pc1.setRemoteDescription(pc2.localDescription))
         self.assertEqual(pc1.remoteDescription, pc2.localDescription)
         self.assertEqual(pc1.iceConnectionState, "completed")
 
         # allow media to flow long enough to collect stats
-        await asyncio.sleep(2)
+        run(asyncio.sleep(2))
 
         # close
-        await pc1.close()
-        await pc2.close()
+        run(pc1.close())
+        run(pc2.close())
         self.assertEqual(pc1.iceConnectionState, "closed")
         self.assertEqual(pc2.iceConnectionState, "closed")
 

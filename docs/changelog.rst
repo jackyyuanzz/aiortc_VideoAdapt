@@ -3,37 +3,6 @@ Changelog
 
 .. currentmodule:: aiortc
 
-1.3.2
------
-
-* Limit size of NACK reports to avoid excessive packet size.
-* Improve H.264 codec matching.
-* Determine video size from first frame received by :class:`aiortc.contrib.media.MediaRecorder`.
-* Fix a deprecation warning when using `av` >= 9.1.0.
-* Tolerate STUN URLs containing a `protocol` querystring argument.
-
-1.3.1
------
-
- * Build wheels for aarch64 on Linux.
- * Adapt :class:`aiortc.contrib.media.MediaPlayer` for PyAV 9.x.
- * Ensure H.264 produces B-frames by resetting picture type.
-
-1.3.0
------
-
- * Build wheels for Python 3.10 and for arm64 on Mac.
- * Build wheels against `libvpx` 1.10.
- * Add support for looping in :class:`aiortc.contrib.media.MediaPlayer`.
- * Add unbuffered option to :class:`aiortc.contrib.media.MediaRelay`.
- * Calculate audio energy and send in RTP header extension.
- * Fix a race condition in RTP sender/receiver shutdown.
- * Improve performance of H.264 bitstream splitting code.
- * Update imports for `pyee` version 9.x.
- * Fully switch to `google-crc32c` instead of `crc32`.
- * Drop support for Python 3.6.
- * Remove `apprtc` code as the service is no longer publicly hosted.
-
 1.2.1
 -----
 

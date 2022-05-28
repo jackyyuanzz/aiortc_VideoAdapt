@@ -4,18 +4,16 @@ import fractions
 import logging
 import threading
 import time
-from typing import Dict, Optional, Set, Union
+from typing import Dict, Optional, Set
 
 import av
 from av import AudioFrame, VideoFrame
-from av.audio import AudioStream
 from av.frame import Frame
-from av.packet import Packet
-from av.video.stream import VideoStream
 
 from ..mediastreams import AUDIO_PTIME, MediaStreamError, MediaStreamTrack
 
 logger = logging.getLogger(__name__)
+
 
 REAL_TIME_FORMATS = [
     "alsa",
@@ -83,24 +81,17 @@ class MediaBlackhole:
         self.__tracks = {}
 
 
-def player_worker_decode(
-    loop,
-    container,
-    streams,
-    audio_track,
-    video_track,
-    quit_event,
-    throttle_playback,
-    loop_playback,
+def player_worker(
+    loop, container, streams, audio_track, video_track, quit_event, throttle_playback
 ):
+    audio_fifo = av.AudioFifo()
+    audio_format_name = "s16"
+    audio_layout_name = "stereo"
     audio_sample_rate = 48000
     audio_samples = 0
-    audio_time_base = fractions.Fraction(1, audio_sample_rate)
+    audio_samples_per_frame = int(audio_sample_rate * AUDIO_PTIME)
     audio_resampler = av.AudioResampler(
-        format="s16",
-        layout="stereo",
-        rate=audio_sample_rate,
-        frame_size=int(audio_sample_rate * AUDIO_PTIME),
+        format=audio_format_name, layout=audio_layout_name, rate=audio_sample_rate
     )
 
     video_first_pts = None
@@ -111,12 +102,9 @@ def player_worker_decode(
     while not quit_event.is_set():
         try:
             frame = next(container.decode(*streams))
-        except Exception as exc:
+        except (av.AVError, StopIteration) as exc:
             if isinstance(exc, av.FFmpegError) and exc.errno == errno.EAGAIN:
                 time.sleep(0.01)
-                continue
-            if isinstance(exc, StopIteration) and loop_playback:
-                container.seek(0)
                 continue
             if audio_track:
                 asyncio.run_coroutine_threadsafe(audio_track._queue.put(None), loop)
@@ -131,14 +119,29 @@ def player_worker_decode(
                 time.sleep(0.1)
 
         if isinstance(frame, AudioFrame) and audio_track:
-            for frame in audio_resampler.resample(frame):
-                # fix timestamps
-                frame.pts = audio_samples
-                frame.time_base = audio_time_base
-                audio_samples += frame.samples
+            if (
+                frame.format.name != audio_format_name
+                or frame.layout.name != audio_layout_name
+                or frame.sample_rate != audio_sample_rate
+            ):
+                frame.pts = None
+                frame = audio_resampler.resample(frame)
 
-                frame_time = frame.time
-                asyncio.run_coroutine_threadsafe(audio_track._queue.put(frame), loop)
+            # fix timestamps
+            frame.pts = audio_samples
+            frame.time_base = fractions.Fraction(1, audio_sample_rate)
+            audio_samples += frame.samples
+
+            audio_fifo.write(frame)
+            while True:
+                frame = audio_fifo.read(audio_samples_per_frame)
+                if frame:
+                    frame_time = frame.time
+                    asyncio.run_coroutine_threadsafe(
+                        audio_track._queue.put(frame), loop
+                    )
+                else:
+                    break
         elif isinstance(frame, VideoFrame) and video_track:
             if frame.pts is None:  # pragma: no cover
                 logger.warning(
@@ -155,67 +158,6 @@ def player_worker_decode(
             asyncio.run_coroutine_threadsafe(video_track._queue.put(frame), loop)
 
 
-def player_worker_demux(
-    loop,
-    container,
-    streams,
-    audio_track,
-    video_track,
-    quit_event,
-    throttle_playback,
-    loop_playback,
-):
-    video_first_pts = None
-    frame_time = None
-    start_time = time.time()
-
-    while not quit_event.is_set():
-        try:
-            packet = next(container.demux(*streams))
-            if not packet.size:
-                raise StopIteration
-        except Exception as exc:
-            if isinstance(exc, av.FFmpegError) and exc.errno == errno.EAGAIN:
-                time.sleep(0.01)
-                continue
-            if isinstance(exc, StopIteration) and loop_playback:
-                container.seek(0)
-                continue
-            if video_track:
-                asyncio.run_coroutine_threadsafe(video_track._queue.put(None), loop)
-            break
-
-        # read up to 1 second ahead
-        if throttle_playback:
-            elapsed_time = time.time() - start_time
-            if frame_time and frame_time > elapsed_time + 1:
-                time.sleep(0.1)
-
-        track = None
-        if isinstance(packet.stream, AudioStream) and audio_track:
-            track = audio_track
-        elif isinstance(packet.stream, VideoStream) and video_track:
-            if packet.pts is None:  # pragma: no cover
-                logger.warning(
-                    "MediaPlayer(%s) Skipping video packet with no pts", container.name
-                )
-                continue
-            track = video_track
-
-            # video from a webcam doesn't start at pts 0, cancel out offset
-            if video_first_pts is None:
-                video_first_pts = packet.pts
-            packet.pts -= video_first_pts
-
-        if (
-            track is not None
-            and packet.pts is not None
-            and packet.time_base is not None
-        ):
-            frame_time = int(packet.pts * packet.time_base)
-            asyncio.run_coroutine_threadsafe(track._queue.put(packet), loop)
-
-
 class PlayerStreamTrack(MediaStreamTrack):
     def __init__(self, player, kind):
         super().__init__()
@@ -224,33 +166,30 @@ class PlayerStreamTrack(MediaStreamTrack):
         self._queue = asyncio.Queue()
         self._start = None
 
-    async def recv(self) -> Union[Frame, Packet]:
+    async def recv(self):
         if self.readyState != "live":
             raise MediaStreamError
 
         self._player._start(self)
-        data = await self._queue.get()
-        if data is None:
+        frame = await self._queue.get()
+        if frame is None:
             self.stop()
             raise MediaStreamError
-        if isinstance(data, Frame):
-            data_time = data.time
-        elif isinstance(data, Packet):
-            data_time = float(data.pts * data.time_base)
+        frame_time = frame.time
 
         # control playback rate
         if (
             self._player is not None
             and self._player._throttle_playback
-            and data_time is not None
+            and frame_time is not None
         ):
             if self._start is None:
-                self._start = time.time() - data_time
+                self._start = time.time() - frame_time
             else:
-                wait = self._start + data_time - time.time()
+                wait = self._start + frame_time - time.time()
                 await asyncio.sleep(wait)
 
-        return data
+        return frame
 
     def stop(self):
         super().stop()
@@ -293,10 +232,9 @@ class MediaPlayer:
     :param file: The path to a file, or a file-like object.
     :param format: The format to use, defaults to autodect.
     :param options: Additional options to pass to FFmpeg.
-    :param loop: Whether to repeat playback indefinitely (requires a seekable file).
     """
 
-    def __init__(self, file, format=None, options={}, loop=False, decode=True):
+    def __init__(self, file, format=None, options={}):
         self.__container = av.open(file=file, format=format, mode="r", options=options)
         self.__thread: Optional[threading.Thread] = None
         self.__thread_quit: Optional[threading.Event] = None
@@ -304,34 +242,19 @@ class MediaPlayer:
         # examine streams
         self.__started: Set[PlayerStreamTrack] = set()
         self.__streams = []
-        self.__decode = decode
         self.__audio: Optional[PlayerStreamTrack] = None
         self.__video: Optional[PlayerStreamTrack] = None
         for stream in self.__container.streams:
             if stream.type == "audio" and not self.__audio:
-                if self.__decode:
-                    self.__audio = PlayerStreamTrack(self, kind="audio")
-                    self.__streams.append(stream)
-                elif stream.codec_context.name in ["opus", "pcm_alaw", "pcm_mulaw"]:
-                    self.__audio = PlayerStreamTrack(self, kind="audio")
-                    self.__streams.append(stream)
+                self.__audio = PlayerStreamTrack(self, kind="audio")
+                self.__streams.append(stream)
             elif stream.type == "video" and not self.__video:
-                if self.__decode:
-                    self.__video = PlayerStreamTrack(self, kind="video")
-                    self.__streams.append(stream)
-                elif stream.codec_context.name in ["h264", "vp8"]:
-                    self.__video = PlayerStreamTrack(self, kind="video")
-                    self.__streams.append(stream)
+                self.__video = PlayerStreamTrack(self, kind="video")
+                self.__streams.append(stream)
 
         # check whether we need to throttle playback
         container_format = set(self.__container.format.name.split(","))
         self._throttle_playback = not container_format.intersection(REAL_TIME_FORMATS)
-
-        # check whether the looping is supported
-        assert (
-            not loop or self.__container.duration is not None
-        ), "The `loop` argument requires a seekable file"
-        self._loop_playback = loop
 
     @property
     def audio(self) -> MediaStreamTrack:
@@ -354,7 +277,7 @@ class MediaPlayer:
             self.__thread_quit = threading.Event()
             self.__thread = threading.Thread(
                 name="media-player",
-                target=player_worker_decode if self.__decode else player_worker_demux,
+                target=player_worker,
                 args=(
                     asyncio.get_event_loop(),
                     self.__container,
@@ -363,7 +286,6 @@ class MediaPlayer:
                     self.__video,
                     self.__thread_quit,
                     self._throttle_playback,
-                    self._loop_playback,
                 ),
             )
             self.__thread.start()
@@ -387,7 +309,6 @@ class MediaPlayer:
 
 class MediaRecorderContext:
     def __init__(self, stream):
-        self.started = False
         self.stream = stream
         self.task = None
 
@@ -463,57 +384,34 @@ class MediaRecorder:
                 self.__container.close()
                 self.__container = None
 
-    async def __run_track(self, track: MediaStreamTrack, context: MediaRecorderContext):
+    async def __run_track(self, track, context):
         while True:
             try:
                 frame = await track.recv()
             except MediaStreamError:
                 return
-
-            if not context.started:
-                # adjust the output size to match the first frame
-                if isinstance(frame, VideoFrame):
-                    context.stream.width = frame.width
-                    context.stream.height = frame.height
-                context.started = True
-
             for packet in context.stream.encode(frame):
                 self.__container.mux(packet)
 
 
 class RelayStreamTrack(MediaStreamTrack):
-    def __init__(self, relay, source: MediaStreamTrack, buffered) -> None:
+    def __init__(self, relay, source: MediaStreamTrack) -> None:
         super().__init__()
         self.kind = source.kind
         self._relay = relay
+        self._queue: asyncio.Queue[Optional[Frame]] = asyncio.Queue()
         self._source: Optional[MediaStreamTrack] = source
-        self._buffered = buffered
-
-        self._frame: Optional[Frame] = None
-        self._queue: Optional[asyncio.Queue[Optional[Frame]]] = None
-        self._new_frame_event: Optional[asyncio.Event] = None
-
-        if self._buffered:
-            self._queue = asyncio.Queue()
-        else:
-            self._new_frame_event = asyncio.Event()
 
     async def recv(self):
         if self.readyState != "live":
             raise MediaStreamError
 
         self._relay._start(self)
-
-        if self._buffered:
-            self._frame = await self._queue.get()
-        else:
-            await self._new_frame_event.wait()
-            self._new_frame_event.clear()
-
-        if self._frame is None:
+        frame = await self._queue.get()
+        if frame is None:
             self.stop()
             raise MediaStreamError
-        return self._frame
+        return frame
 
     def stop(self):
         super().stop()
@@ -535,18 +433,11 @@ class MediaRelay:
         self.__proxies: Dict[MediaStreamTrack, Set[RelayStreamTrack]] = {}
         self.__tasks: Dict[MediaStreamTrack, asyncio.Future[None]] = {}
 
-    def subscribe(
-        self, track: MediaStreamTrack, buffered: bool = True
-    ) -> MediaStreamTrack:
+    def subscribe(self, track: MediaStreamTrack) -> MediaStreamTrack:
         """
         Create a proxy around the given `track` for a new consumer.
-
-        :param track: Source :class:`MediaStreamTrack` which is relayed
-        :param buffered: Whether there need a buffer between the source track and relayed track
-
-        :rtype: :class: MediaStreamTrack
         """
-        proxy = RelayStreamTrack(self, track, buffered)
+        proxy = RelayStreamTrack(self, track)
         self.__log_debug("Create proxy %s for source %s", id(proxy), id(track))
         if track not in self.__proxies:
             self.__proxies[track] = set()
@@ -583,11 +474,7 @@ class MediaRelay:
             except MediaStreamError:
                 frame = None
             for proxy in self.__proxies[track]:
-                if proxy._buffered:
-                    proxy._queue.put_nowait(frame)
-                else:
-                    proxy._frame = frame
-                    proxy._new_frame_event.set()
+                proxy._queue.put_nowait(frame)
             if frame is None:
                 break
 

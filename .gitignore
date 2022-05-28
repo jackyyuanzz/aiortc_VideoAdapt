@@ -6,6 +6,7 @@
 .idea
 .mypy_cache
 .vscode
+*.mp4
 /build
 /dist
 /docs/_build

@@ -4,10 +4,11 @@ import math
 from itertools import tee
 from struct import pack, unpack_from
 from typing import Iterator, List, Optional, Sequence, Tuple, Type, TypeVar
+import numpy as np
+import cv2
 
 import av
 from av.frame import Frame
-from av.packet import Packet
 
 from ..jitterbuffer import JitterFrame
 from ..mediastreams import VIDEO_TIME_BASE, convert_timebase
@@ -16,8 +17,10 @@ from .base import Decoder, Encoder
 logger = logging.getLogger(__name__)
 
 DEFAULT_BITRATE = 1000000  # 1 Mbps
-MIN_BITRATE = 500000  # 500 kbps
-MAX_BITRATE = 3000000  # 3 Mbps
+#MIN_BITRATE = 500000  # 500 kbps
+MIN_BITRATE = 10000  # 10 kbps = 0.01 Mbps
+#MAX_BITRATE = 3000000  # 3 Mbps
+MAX_BITRATE = 10000000  # 10 Mbps
 
 MAX_FRAME_RATE = 30
 PACKET_MAX = 1300
@@ -147,6 +150,13 @@ class H264Encoder(Encoder):
         self.codec: Optional[av.CodecContext] = None
         self.codec_buffering = False
         self.__target_bitrate = DEFAULT_BITRATE
+        self.estimated_bandwidth = 0
+        self.height = 100
+        self.width = 100
+        self.bitrate_history = np.zeros((720,1280,3))
+        self.current_pix = 0
+        self.freq = 0
+        self.resolution_mode = 0
 
     @staticmethod
     def _packetize_fu_a(data: bytes) -> List[bytes]:
@@ -223,30 +233,32 @@ class H264Encoder(Encoder):
 
     @staticmethod
     def _split_bitstream(buf: bytes) -> Iterator[bytes]:
-        # Translated from: https://github.com/aizvorski/h264bitstream/blob/master/h264_nal.c#L134
+        # TODO: write in a more pytonic way,
+        # translate from: https://github.com/aizvorski/h264bitstream/blob/master/h264_nal.c#L134
         i = 0
         while True:
-            # Find the start of the NAL unit
-            # NAL Units start with a 3-byte or 4 byte start code of 0x000001 or 0x00000001
-            # while buf[i:i+3] != b'\x00\x00\x01':
-            i = buf.find(b"\x00\x00\x01", i)
-            if i == -1:
-                return
-
-            # Jump past the start code
+            while (buf[i] != 0 or buf[i + 1] != 0 or buf[i + 2] != 0x01) and (
+                buf[i] != 0 or buf[i + 1] != 0 or buf[i + 2] != 0 or buf[i + 3] != 0x01
+            ):
+                i += 1  # skip leading zero
+                if i + 4 >= len(buf):
+                    return
+            if buf[i] != 0 or buf[i + 1] != 0 or buf[i + 2] != 0x01:
+                i += 1
             i += 3
             nal_start = i
-
-            # Find the end of the NAL unit (end of buffer OR next start code)
-            i = buf.find(b"\x00\x00\x01", i)
-            if i == -1:
-                yield buf[nal_start : len(buf)]
-                return
-            elif buf[i - 1] == 0:
-                # 4-byte start code case, jump back one byte
-                yield buf[nal_start : i - 1]
-            else:
-                yield buf[nal_start:i]
+            while (buf[i] != 0 or buf[i + 1] != 0 or buf[i + 2] != 0) and (
+                buf[i] != 0 or buf[i + 1] != 0 or buf[i + 2] != 0x01
+            ):
+                i += 1
+                # FIXME: the next line fails when reading a nal that ends
+                # exactly at the end of the data
+                if i + 3 >= len(buf):
+                    nal_end = len(buf)
+                    yield buf[nal_start:nal_end]
+                    return  # did not find nal end, stream ended first
+            nal_end = i
+            yield buf[nal_start:nal_end]
 
     @classmethod
     def _packetize(cls, packages: Iterator[bytes]) -> List[bytes]:
@@ -278,14 +290,12 @@ class H264Encoder(Encoder):
             self.buffer_pts = None
             self.codec = None
 
-        # reset the picture type, otherwise no B-frames are produced
-        frame.pict_type = av.video.frame.PictureType.NONE
-
         if self.codec is None:
             try:
                 self.codec, self.codec_buffering = create_encoder_context(
                     "h264_omx", frame.width, frame.height, bitrate=self.target_bitrate
                 )
+                print('Using OMX')
             except Exception:
                 self.codec, self.codec_buffering = create_encoder_context(
                     "libx264",
@@ -293,10 +303,12 @@ class H264Encoder(Encoder):
                     frame.height,
                     bitrate=self.target_bitrate,
                 )
+                print('Using libX')
+
 
         data_to_send = b""
         for package in self.codec.encode(frame):
-            package_bytes = bytes(package)
+            package_bytes = package.to_bytes()
             if self.codec_buffering:
                 # delay sending to ensure we accumulate all packages
                 # for a given PTS
@@ -316,14 +328,33 @@ class H264Encoder(Encoder):
         self, frame: Frame, force_keyframe: bool = False
     ) -> Tuple[List[bytes], int]:
         assert isinstance(frame, av.VideoFrame)
+        print('codec width, height: {}, {}'.format(self.width, self.height))
+        print(self.__target_bitrate)
+        kbps = float(self.target_bitrate)/1000
+        y_val = np.clip( -int(720/2*(kbps/(MAX_BITRATE/1000))) + 720//2, 0,719)
+        color = np.zeros((1,3))
+        color[0,self.resolution_mode] = 255
+        self.bitrate_history[y_val,self.current_pix] = color
+        self.freq += 1
+        if self.freq == 5:
+            self.current_pix += 1
+            self.freq = 0
+        if self.current_pix == 1200:
+            self.current_pix = 0
+            self.bitrate_history = np.zeros((720,1280,3))
+        frame_np = frame.to_ndarray(format='rgb24')
+        frame_np = cv2.resize(frame_np, (self.width, self.height))
+        overlay = cv2.resize(self.bitrate_history, (frame_np.shape[1], frame_np.shape[0]))
+        frame_np[np.sum(overlay,axis=2)!=0] = overlay[np.sum(overlay,axis=2)!=0]
+        # frame_np[overlay!=0] = color
+        orig_frame = frame
+        frame = av.VideoFrame.from_ndarray(frame_np, format='rgb24')
         packages = self._encode_frame(frame, force_keyframe)
-        timestamp = convert_timebase(frame.pts, frame.time_base, VIDEO_TIME_BASE)
-        return self._packetize(packages), timestamp
+        timestamp = convert_timebase(orig_frame.pts, orig_frame.time_base, VIDEO_TIME_BASE)
 
-    def pack(self, packet: Packet) -> Tuple[List[bytes], int]:
-        assert isinstance(packet, av.Packet)
-        packages = self._split_bitstream(bytes(packet))
-        timestamp = convert_timebase(packet.pts, packet.time_base, VIDEO_TIME_BASE)
+        # frame = frame.reformat(width = self.width, height=self.height)
+        # packages = self._encode_frame(frame, force_keyframe)
+        # timestamp = convert_timebase(frame.pts, frame.time_base, VIDEO_TIME_BASE)
         return self._packetize(packages), timestamp
 
     @property

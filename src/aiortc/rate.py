@@ -574,6 +574,7 @@ class RemoteBitrateEstimator:
             )
             if target_bitrate is not None:
                 self.last_update_ms = arrival_time_ms
-                return target_bitrate, list(self.ssrcs.keys())
+                estimated_throughput = self.rate_control.latest_estimated_throughput
+                return target_bitrate, estimated_throughput, list(self.ssrcs.keys())
 
         return None

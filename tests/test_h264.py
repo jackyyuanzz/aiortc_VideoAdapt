@@ -3,8 +3,6 @@ import io
 from contextlib import redirect_stderr
 from unittest import TestCase
 
-from av import Packet
-
 from aiortc.codecs import get_decoder, get_encoder, h264
 from aiortc.codecs.h264 import H264Decoder, H264Encoder, H264PayloadDescriptor
 from aiortc.jitterbuffer import JitterFrame
@@ -18,15 +16,22 @@ H264_CODEC = RTCRtpCodecParameters(
 )
 
 
+class DummyPacket:
+    def __init__(self, dts, pts):
+        self.dts = dts
+        self.pts = pts
+
+    def to_bytes(self):
+        return b""
+
+
 class FragmentedCodecContext:
     def __init__(self, orig):
         self.__orig = orig
 
     def encode(self, frame):
         packages = self.__orig.encode(frame)
-        dummy = Packet()
-        dummy.pts = packages[0].pts
-        packages.append(dummy)
+        packages.append(DummyPacket(packages[0].dts, packages[0].pts))
         return packages
 
     def __getattr__(self, name):
@@ -101,7 +106,7 @@ class H264PayloadDescriptorTest(TestCase):
 class H264Test(CodecTestCase):
     def test_decoder(self):
         decoder = get_decoder(H264_CODEC)
-        self.assertIsInstance(decoder, H264Decoder)
+        self.assertTrue(isinstance(decoder, H264Decoder))
 
         # decode junk
         with redirect_stderr(io.StringIO()):
@@ -110,20 +115,11 @@ class H264Test(CodecTestCase):
 
     def test_encoder(self):
         encoder = get_encoder(H264_CODEC)
-        self.assertIsInstance(encoder, H264Encoder)
+        self.assertTrue(isinstance(encoder, H264Encoder))
 
         frame = self.create_video_frame(width=640, height=480, pts=0)
         packages, timestamp = encoder.encode(frame)
         self.assertGreaterEqual(len(packages), 1)
-
-    def test_encoder_pack(self):
-        encoder = get_encoder(H264_CODEC)
-        self.assertTrue(isinstance(encoder, H264Encoder))
-
-        packet = self.create_packet(payload=bytes([0, 0, 1, 0]), pts=1)
-        payloads, timestamp = encoder.pack(packet)
-        self.assertEqual(payloads, [b"\x00"])
-        self.assertEqual(timestamp, 90)
 
     def test_encoder_buffering(self):
         create_encoder_context = h264.create_encoder_context
@@ -135,7 +131,7 @@ class H264Test(CodecTestCase):
         h264.create_encoder_context = mock_create_encoder_context
         try:
             encoder = get_encoder(H264_CODEC)
-            self.assertIsInstance(encoder, H264Encoder)
+            self.assertTrue(isinstance(encoder, H264Encoder))
 
             frame = self.create_video_frame(width=640, height=480, pts=0)
             packages, timestamp = encoder.encode(frame)
@@ -149,7 +145,7 @@ class H264Test(CodecTestCase):
 
     def test_encoder_target_bitrate(self):
         encoder = get_encoder(H264_CODEC)
-        self.assertIsInstance(encoder, H264Encoder)
+        self.assertTrue(isinstance(encoder, H264Encoder))
         self.assertEqual(encoder.target_bitrate, 1000000)
 
         frame = self.create_video_frame(width=640, height=480, pts=0)
@@ -186,41 +182,16 @@ class H264Test(CodecTestCase):
         self.roundtrip_video(H264_CODEC, 320, 240)
 
     def test_split_bitstream(self):
-        # No start code
-        packages = list(H264Encoder._split_bitstream(b"\x00\x00\x00\x00"))
-        self.assertEqual(packages, [])
+        packages = list(H264Encoder._split_bitstream(b"\00\00\01\ff\00\00\01\ff"))
+        self.assertEqual(len(packages), 2)
 
-        # 3-byte start code
+        packages = list(H264Encoder._split_bitstream(b"\00\00\00\01\ff"))
+        self.assertEqual(len(packages), 1)
+
         packages = list(
-            H264Encoder._split_bitstream(b"\x00\x00\x01\xFF\x00\x00\x01\xFB")
+            H264Encoder._split_bitstream(b"\00\00\00\00\00\00\01\ff\00\00\00\00\00")
         )
-        self.assertEqual(packages, [b"\xFF", b"\xFB"])
-
-        # 4-byte start code
-        packages = list(
-            H264Encoder._split_bitstream(b"\x00\x00\x00\x01\xFF\x00\x00\x00\x01\xFB")
-        )
-        self.assertEqual(packages, [b"\xFF", b"\xFB"])
-
-        # Multiple bytes in a packet
-        packages = list(
-            H264Encoder._split_bitstream(
-                b"\x00\x00\x00\x01\xFF\xAB\xCD\x00\x00\x00\x01\xFB"
-            )
-        )
-        self.assertEqual(packages, [b"\xFF\xAB\xCD", b"\xFB"])
-
-        # Skip leading 0s
-        packages = list(H264Encoder._split_bitstream(b"\x00\x00\x00\x01\xFF"))
-        self.assertEqual(packages, [b"\xFF"])
-
-        # Both leading and trailing 0s
-        packages = list(
-            H264Encoder._split_bitstream(
-                b"\x00\x00\x00\x00\x00\x00\x01\xFF\x00\x00\x00\x00\x00"
-            )
-        )
-        self.assertEqual(packages, [b"\xFF\x00\x00\x00\x00\x00"])
+        self.assertEqual(len(packages), 1)
 
     def test_packetize_one_small(self):
         packages = [bytes([0xFF, 0xFF])]

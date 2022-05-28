@@ -1,7 +1,7 @@
+from collections import OrderedDict
 from typing import Dict, List, Optional, Union
 
 from ..rtcrtpparameters import (
-    ParametersDict,
     RTCRtcpFeedback,
     RTCRtpCapabilities,
     RTCRtpCodecCapability,
@@ -34,12 +34,7 @@ CODECS: Dict[str, List[RTCRtpCodecParameters]] = {
 }
 HEADER_EXTENSIONS: Dict[str, List[RTCRtpHeaderExtensionParameters]] = {
     "audio": [
-        RTCRtpHeaderExtensionParameters(
-            id=1, uri="urn:ietf:params:rtp-hdrext:sdes:mid"
-        ),
-        RTCRtpHeaderExtensionParameters(
-            id=2, uri="urn:ietf:params:rtp-hdrext:ssrc-audio-level"
-        ),
+        RTCRtpHeaderExtensionParameters(id=1, uri="urn:ietf:params:rtp-hdrext:sdes:mid")
     ],
     "video": [
         RTCRtpHeaderExtensionParameters(
@@ -56,7 +51,7 @@ def init_codecs() -> None:
     dynamic_pt = 97
 
     def add_video_codec(
-        mimeType: str, parameters: Optional[ParametersDict] = None
+        mimeType: str, parameters: Optional[OrderedDict] = None
     ) -> None:
         nonlocal dynamic_pt
 
@@ -71,27 +66,38 @@ def init_codecs() -> None:
                     RTCRtcpFeedback(type="nack", parameter="pli"),
                     RTCRtcpFeedback(type="goog-remb"),
                 ],
-                parameters=parameters or {},
+                parameters=parameters or OrderedDict(),
             ),
             RTCRtpCodecParameters(
                 mimeType="video/rtx",
                 clockRate=clockRate,
                 payloadType=dynamic_pt + 1,
-                parameters={"apt": dynamic_pt},
+                parameters=OrderedDict([("apt", dynamic_pt)]),
             ),
         ]
         dynamic_pt += 2
 
     add_video_codec("video/VP8")
-    for profile_level_id in ("42001f", "42e01f"):
-        add_video_codec(
-            "video/H264",
-            {
-                "level-asymmetry-allowed": "1",
-                "packetization-mode": "1",
-                "profile-level-id": profile_level_id,
-            },
-        )
+    add_video_codec(
+        "video/H264",
+        OrderedDict(
+            (
+                ("packetization-mode", "1"),
+                ("level-asymmetry-allowed", "1"),
+                ("profile-level-id", "42001f"),
+            )
+        ),
+    )
+    add_video_codec(
+        "video/H264",
+        OrderedDict(
+            (
+                ("packetization-mode", "1"),
+                ("level-asymmetry-allowed", "1"),
+                ("profile-level-id", "42e01f"),
+            )
+        ),
+    )
 
 
 def depayload(codec: RTCRtpCodecParameters, payload: bytes) -> bytes:

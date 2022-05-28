@@ -19,12 +19,12 @@ cffi_modules = [
 ]
 install_requires = [
     "aioice>=0.7.5,<0.8.0",
-    "av>=9.0.0,<10.0.0",
+    "av>=8.0.0,<9.0.0",
     "cffi>=1.0.0",
     "cryptography>=2.2",
     'dataclasses; python_version < "3.7"',
     "google-crc32c>=1.1",
-    "pyee>=9.0.0",
+    "pyee>=6.0.0",
     "pylibsrtp>=0.5.6",
 ]
 
@@ -33,12 +33,13 @@ extras_require = {
         'aiohttp>=3.7.0',
         'coverage>=5.0',
         'numpy>=1.19.0',
+        'websockets>=8.0',
     ]
 }
 
-# Do not build cffi modules on readthedocs as we lack the codec development files.
 if os.environ.get("READTHEDOCS") == "True":
     cffi_modules = []
+    install_requires = list(filter(lambda x: not x.startswith("av"), install_requires))
 
 setuptools.setup(
     name=about["__title__"],
@@ -60,7 +61,6 @@ setuptools.setup(
         "Programming Language :: Python :: 3.7",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
-        "Programming Language :: Python :: 3.10",
     ],
     cffi_modules=cffi_modules,
     package_dir={"": "src"},
