@@ -1,6 +1,10 @@
 aiortc
 ======
 
+Code forked from `aiortc <https://github.com/aiortc/aiortc>`_, a python implementation of WebRTC.
+
+The code was modified to use bandwidth estimatoin from `REBERA <https://wp.nyu.edu/videolab/research/past-research/rebera/>`_, and allow adapting the spatial resolution of the video based on estimated bandwidth.
+
 Installing
 ----------
 Linux
