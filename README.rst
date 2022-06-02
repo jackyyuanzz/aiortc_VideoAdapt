@@ -39,7 +39,7 @@ On sender side run:
 
 .. code:: bash
 
-    python cli.py --offer --play-from test.mp4
+    python cli.py offer --play-from test.mp4
 
 This will generate a message, which should be copied to the receiver side.
 
@@ -47,7 +47,7 @@ On receiver side run:
 
 .. code:: bash
 
-    python cli.py --answer
+    python cli.py answer
 or
 
 .. code:: bash
