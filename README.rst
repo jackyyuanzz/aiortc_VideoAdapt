@@ -23,13 +23,34 @@ built from you will also need to run:
 
     apt install libsrtp2-dev
 
-Install python==3.9.7
+Install python==3.9.7, suggest to use anaconda environment.
 
 Install aiortc in developer mode
 
 .. code:: bash
 
     pip install -e .
+    
+MacOS
+.....
+
+Run:
+
+.. code:: bash
+
+    brew install ffmpeg opus libvpx pkg-config
+    
+Install python==3.9.7, suggest to use anaconda environment.
+
+Install aiortc in developer mode:
+
+.. code:: bash
+
+    pip install \ 
+       --global-option=build_ext 
+       --global-option="-I/opt/homebrew/Cellar/opus/1.3.1/include:/opt/homebrew/Cellar/libvpx/1.11.0/include" \
+       --global-option="-L/opt/homebrew/Cellar/opus/1.3.1/lib:/opt/homebrew/Cellar/libvpx/1.11.0/lib" -e .
+       
 
 Running experiments
 ----------
