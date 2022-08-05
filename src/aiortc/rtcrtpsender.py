@@ -96,6 +96,7 @@ class RTCRtpSender:
         self.__rtt = None
 
         self.switch_count = 0
+        self.resolution_choice = 0
 
     @property
     def kind(self):
@@ -244,29 +245,27 @@ class RTCRtpSender:
                         "- receiver estimated maximum bitrate %d bps", bitrate
                     )
                     if self.__encoder and hasattr(self.__encoder, "target_bitrate"):
-                        pass
-                        # print('set_target_bitrate')
-                        # self.__encoder.target_bitrate = bitrate
-                        # print('Outside: {}'.format(self.__encoder.target_bitrate))
-                        # Resolutions = [(672,376), (1280,720), (1920//4,1080//4)]
+                        self.__encoder.target_bitrate = bitrate
+                        Resolutions = [(672,376), (1280,720), (1920,1080)]
                         # if bitrate_kbps < 1000:
-                        #     choice = 0
+                        #     self.resolution_choice = 0
                         #     self.__encoder.resolution_mode = 0
                         # elif bitrate_kbps < 3000:
-                        #     choice = 1
+                        #     self.resolution_choice = 1
                         #     self.__encoder.resolution_mode = 1
                         # else:
-                        #     choice = 2
+                        #     self.resolution_choice = 2
                         #     self.__encoder.resolution_mode = 2
-                        # size = Resolutions[choice]
+                        # size = Resolutions[self.resolution_choice]
                         # self.__encoder.width = size[0]
                         # self.__encoder.height = size[1]
-                        # if self.switch_count%20 == 0:
-                        #     choice = np.random.choice([0,1])
-                        #     size = Resolutions[choice]
-                        #     self.__encoder.width = size[0]
-                        #     self.__encoder.height = size[1]
-                        # self.switch_count += 1
+                        if self.switch_count%20 == 0:
+                            # self.resolution_choice = (self.resolution_choice+1)%3
+                            self.resolution_choice = 2
+                            size = Resolutions[self.resolution_choice]
+                            self.__encoder.width = size[0]
+                            self.__encoder.height = size[1]
+                        self.switch_count += 1
 
             except ValueError:
                 pass
