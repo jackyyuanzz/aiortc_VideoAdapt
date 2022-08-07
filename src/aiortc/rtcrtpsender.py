@@ -259,10 +259,11 @@ class RTCRtpSender:
                         # size = Resolutions[self.resolution_choice]
                         # self.__encoder.width = size[0]
                         # self.__encoder.height = size[1]
-                        if self.switch_count%20 == 0:
+                        if self.switch_count%40 == 0:
                             # self.resolution_choice = (self.resolution_choice+1)%3
-                            self.resolution_choice = 2
+                            self.resolution_choice = 1
                             size = Resolutions[self.resolution_choice]
+                            print("******Switched to resolution with size: {} *******".format(size))
                             self.__encoder.width = size[0]
                             self.__encoder.height = size[1]
                         self.switch_count += 1
