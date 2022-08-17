@@ -353,13 +353,15 @@ class H264Encoder(Encoder):
         # frame_np[overlay!=0] = color
         # orig_frame = frame
         # frame = av.VideoFrame.from_ndarray(frame_np, format='rgb24')
-        if self.height == 376:
-            frame = self.reformatter_low(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
-        elif self.height == 720:
-            frame = self.reformatter_medium(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
-        elif self.height == 1080:
-            frame = self.reformatter_high(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
-        packages = self._encode_frame(frame, force_keyframe)
+
+        # if self.height == 376:
+        #     frame = self.reformatter_low(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
+        # elif self.height == 720:
+        #     frame = self.reformatter_medium(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
+        # elif self.height == 1080:
+        #     frame = self.reformatter_high(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
+        frame_resized = frame.reformat(width = self.width, height=self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
+        packages = self._encode_frame(frame_resized, force_keyframe)
         timestamp = convert_timebase(frame.pts, frame.time_base, VIDEO_TIME_BASE)
 
         # frame = frame.reformat(width = self.width, height=self.height)
