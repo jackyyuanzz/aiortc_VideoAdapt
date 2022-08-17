@@ -157,6 +157,7 @@ class H264Encoder(Encoder):
         self.current_pix = 0
         self.freq = 0
         self.resolution_mode = 0
+        
 
     @staticmethod
     def _packetize_fu_a(data: bytes) -> List[bytes]:
@@ -330,22 +331,22 @@ class H264Encoder(Encoder):
         assert isinstance(frame, av.VideoFrame)
         print('codec width, height: {}, {}'.format(self.width, self.height))
         print(self.__target_bitrate)
-        kbps = float(self.target_bitrate)/1000
-        y_val = np.clip( -int(720/2*(kbps/(MAX_BITRATE/1000))) + 720//2, 0,719)
-        color = np.zeros((1,3))
-        color[0,self.resolution_mode] = 255
-        self.bitrate_history[y_val,self.current_pix] = color
-        self.freq += 1
-        if self.freq == 5:
-            self.current_pix += 1
-            self.freq = 0
-        if self.current_pix == 1200:
-            self.current_pix = 0
-            self.bitrate_history = np.zeros((720,1280,3))
+        # kbps = float(self.target_bitrate)/1000
+        # y_val = np.clip( -int(720/2*(kbps/(MAX_BITRATE/1000))) + 720//2, 0,719)
+        # color = np.zeros((1,3))
+        # color[0,self.resolution_mode] = 255
+        # self.bitrate_history[y_val,self.current_pix] = color
+        # self.freq += 1
+        # if self.freq == 5:
+        #     self.current_pix += 1
+        #     self.freq = 0
+        # if self.current_pix == 1200:
+        #     self.current_pix = 0
+        #     self.bitrate_history = np.zeros((720,1280,3))
         frame_np = frame.to_ndarray(format='rgb24')
         frame_np = cv2.resize(frame_np, (self.width, self.height))
-        overlay = cv2.resize(self.bitrate_history, (frame_np.shape[1], frame_np.shape[0]))
-        frame_np[np.sum(overlay,axis=2)!=0] = overlay[np.sum(overlay,axis=2)!=0]
+        # overlay = cv2.resize(self.bitrate_history, (frame_np.shape[1], frame_np.shape[0]))
+        # frame_np[np.sum(overlay,axis=2)!=0] = overlay[np.sum(overlay,axis=2)!=0]
         # frame_np[overlay!=0] = color
         orig_frame = frame
         frame = av.VideoFrame.from_ndarray(frame_np, format='rgb24')
