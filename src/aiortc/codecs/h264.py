@@ -5,10 +5,11 @@ from itertools import tee
 from struct import pack, unpack_from
 from typing import Iterator, List, Optional, Sequence, Tuple, Type, TypeVar
 import numpy as np
-import cv2
-
-import av
+import time
 from av.frame import Frame
+import av
+import cv2
+import time
 
 from ..jitterbuffer import JitterFrame
 from ..mediastreams import VIDEO_TIME_BASE, convert_timebase
@@ -151,15 +152,15 @@ class H264Encoder(Encoder):
         self.codec_buffering = False
         self.__target_bitrate = DEFAULT_BITRATE
         self.estimated_bandwidth = 0
-        self.height = 100
-        self.width = 100
+        self.height = 150
+        self.width = 150
         self.bitrate_history = np.zeros((720,1280,3))
         self.current_pix = 0
         self.freq = 0
         self.resolution_mode = 0
-        self.reformatter_low = av.video.reformatter.VideoReformatter()
-        self.reformatter_medium = av.video.reformatter.VideoReformatter()
-        self.reformatter_high = av.video.reformatter.VideoReformatter()
+        # self.reformatter_low = av.video.reformatter.VideoReformatter()
+        # self.reformatter_medium = av.video.reformatter.VideoReformatter()
+        # self.reformatter_high = av.video.reformatter.VideoReformatter()
 
 
     @staticmethod
@@ -297,9 +298,9 @@ class H264Encoder(Encoder):
         if self.codec is None:
             try:
                 self.codec, self.codec_buffering = create_encoder_context(
-                    "h264_omx", frame.width, frame.height, bitrate=self.target_bitrate
+                    "h264_nvenc", frame.width, frame.height, bitrate=self.target_bitrate
                 )
-                print('Using OMX')
+                print('Using libX')
             except Exception:
                 self.codec, self.codec_buffering = create_encoder_context(
                     "libx264",
@@ -332,8 +333,8 @@ class H264Encoder(Encoder):
         self, frame: Frame, force_keyframe: bool = False
     ) -> Tuple[List[bytes], int]:
         assert isinstance(frame, av.VideoFrame)
-        print('codec width, height: {}, {}'.format(self.width, self.height))
-        print(self.__target_bitrate)
+        print('codec width, height: {}, {};  target bitrate: {} Mbps'.format(self.width, self.height, self.__target_bitrate/1e6))
+
         # kbps = float(self.target_bitrate)/1000
         # y_val = np.clip( -int(720/2*(kbps/(MAX_BITRATE/1000))) + 720//2, 0,719)
         # color = np.zeros((1,3))
@@ -346,26 +347,30 @@ class H264Encoder(Encoder):
         # if self.current_pix == 1200:
         #     self.current_pix = 0
         #     self.bitrate_history = np.zeros((720,1280,3))
-        # frame_np = frame.to_ndarray(format='rgb24')
-        # frame_np = cv2.resize(frame_np, (self.width, self.height))
+        #frame_np = frame.to_ndarray(format='rgb24')
+        #frame_np = cv2.resize(frame_np, (self.width, self.height), interpolation=cv2.INTER_NEAREST)
         # overlay = cv2.resize(self.bitrate_history, (frame_np.shape[1], frame_np.shape[0]))
         # frame_np[np.sum(overlay,axis=2)!=0] = overlay[np.sum(overlay,axis=2)!=0]
         # frame_np[overlay!=0] = color
-        # orig_frame = frame
-        # frame = av.VideoFrame.from_ndarray(frame_np, format='rgb24')
-        if self.height == 376:
-            frame = self.reformatter_low(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
-        elif self.height == 720:
-            frame = self.reformatter_medium(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
-        elif self.height == 1080:
-            frame = self.reformatter_high(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
+        #orig_frame = frame
+        #frame = av.VideoFrame.from_ndarray(frame_np, format='rgb24')
+
+        #if self.height == 376:
+        #    frame = self.reformatter_low(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
+        #elif self.height == 720:
+        #    frame = self.reformatter_medium(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
+        #elif self.height == 1080:
+        #    frame = self.reformatter_high(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
+
+        start = time.time()
+        frame = av.VideoFrame.reformat(frame, self.width, self.height)
         packages = self._encode_frame(frame, force_keyframe)
         timestamp = convert_timebase(frame.pts, frame.time_base, VIDEO_TIME_BASE)
+        packetized = self._packetize(packages)
+        end = time.time()
+        print("Encoding+TimebaseConv+Packetization took: {:.2f} ms".format((end-start)*1e3))
 
-        # frame = frame.reformat(width = self.width, height=self.height)
-        # packages = self._encode_frame(frame, force_keyframe)
-        # timestamp = convert_timebase(frame.pts, frame.time_base, VIDEO_TIME_BASE)
-        return self._packetize(packages), timestamp
+        return packetized, timestamp
 
     @property
     def target_bitrate(self) -> int:

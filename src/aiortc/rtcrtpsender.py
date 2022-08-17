@@ -245,7 +245,7 @@ class RTCRtpSender:
                         "- receiver estimated maximum bitrate %d bps", bitrate
                     )
                     if self.__encoder and hasattr(self.__encoder, "target_bitrate"):
-                        self.__encoder.target_bitrate = bitrate
+                        self.__encoder.target_bitrate = 10*1e6 # bitrate
                         Resolutions = [(672,376), (1280,720), (1920,1080)]
                         # if bitrate_kbps < 1000:
                         #     self.resolution_choice = 0
@@ -260,8 +260,8 @@ class RTCRtpSender:
                         # self.__encoder.width = size[0]
                         # self.__encoder.height = size[1]
                         if self.switch_count%40 == 0:
-                            # self.resolution_choice = (self.resolution_choice+1)%3
-                            self.resolution_choice = 1
+                            self.resolution_choice = (self.resolution_choice+1)%3
+                            #self.resolution_choice = 2
                             size = Resolutions[self.resolution_choice]
                             print("******Switched to resolution with size: {} *******".format(size))
                             self.__encoder.width = size[0]
