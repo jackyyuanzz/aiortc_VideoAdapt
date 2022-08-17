@@ -157,7 +157,10 @@ class H264Encoder(Encoder):
         self.current_pix = 0
         self.freq = 0
         self.resolution_mode = 0
-        
+        self.reformatter_low = av.video.reformatter.VideoReformatter()
+        self.reformatter_medium = av.video.reformatter.VideoReformatter()
+        self.reformatter_high = av.video.reformatter.VideoReformatter()
+
 
     @staticmethod
     def _packetize_fu_a(data: bytes) -> List[bytes]:
@@ -343,15 +346,21 @@ class H264Encoder(Encoder):
         # if self.current_pix == 1200:
         #     self.current_pix = 0
         #     self.bitrate_history = np.zeros((720,1280,3))
-        frame_np = frame.to_ndarray(format='rgb24')
-        frame_np = cv2.resize(frame_np, (self.width, self.height))
+        # frame_np = frame.to_ndarray(format='rgb24')
+        # frame_np = cv2.resize(frame_np, (self.width, self.height))
         # overlay = cv2.resize(self.bitrate_history, (frame_np.shape[1], frame_np.shape[0]))
         # frame_np[np.sum(overlay,axis=2)!=0] = overlay[np.sum(overlay,axis=2)!=0]
         # frame_np[overlay!=0] = color
-        orig_frame = frame
-        frame = av.VideoFrame.from_ndarray(frame_np, format='rgb24')
+        # orig_frame = frame
+        # frame = av.VideoFrame.from_ndarray(frame_np, format='rgb24')
+        if self.height == 376:
+            frame = self.reformatter_low(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
+        elif self.height == 720:
+            frame = self.reformatter_medium(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
+        elif self.height == 1080:
+            frame = self.reformatter_high(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
         packages = self._encode_frame(frame, force_keyframe)
-        timestamp = convert_timebase(orig_frame.pts, orig_frame.time_base, VIDEO_TIME_BASE)
+        timestamp = convert_timebase(frame.pts, frame.time_base, VIDEO_TIME_BASE)
 
         # frame = frame.reformat(width = self.width, height=self.height)
         # packages = self._encode_frame(frame, force_keyframe)
