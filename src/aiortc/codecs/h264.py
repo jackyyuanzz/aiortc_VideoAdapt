@@ -17,7 +17,7 @@ from .base import Decoder, Encoder
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_BITRATE = 1000000  # 1 Mbps
+DEFAULT_BITRATE = 10000000  # 5 Mbps
 #MIN_BITRATE = 500000  # 500 kbps
 MIN_BITRATE = 10000  # 10 kbps = 0.01 Mbps
 #MAX_BITRATE = 3000000  # 3 Mbps
@@ -137,7 +137,8 @@ def create_encoder_context(
     codec.time_base = fractions.Fraction(1, MAX_FRAME_RATE)
     codec.options = {
         "profile": "baseline",
-        "level": "31",
+        "preset": 'medium',
+        "level": "62",
         "tune": "zerolatency",  # does nothing using h264_omx
     }
     codec.open()
@@ -152,12 +153,13 @@ class H264Encoder(Encoder):
         self.codec_buffering = False
         self.__target_bitrate = DEFAULT_BITRATE
         self.estimated_bandwidth = 0
-        self.height = 150
-        self.width = 150
+        self.height = 1080
+        self.width = 1920
         self.bitrate_history = np.zeros((720,1280,3))
         self.current_pix = 0
         self.freq = 0
         self.resolution_mode = 0
+        self.frame_number = 0
         # self.reformatter_low = av.video.reformatter.VideoReformatter()
         # self.reformatter_medium = av.video.reformatter.VideoReformatter()
         # self.reformatter_high = av.video.reformatter.VideoReformatter()
@@ -238,32 +240,30 @@ class H264Encoder(Encoder):
 
     @staticmethod
     def _split_bitstream(buf: bytes) -> Iterator[bytes]:
-        # TODO: write in a more pytonic way,
-        # translate from: https://github.com/aizvorski/h264bitstream/blob/master/h264_nal.c#L134
+        # Translated from: https://github.com/aizvorski/h264bitstream/blob/master/h264_nal.c#L134
         i = 0
         while True:
-            while (buf[i] != 0 or buf[i + 1] != 0 or buf[i + 2] != 0x01) and (
-                buf[i] != 0 or buf[i + 1] != 0 or buf[i + 2] != 0 or buf[i + 3] != 0x01
-            ):
-                i += 1  # skip leading zero
-                if i + 4 >= len(buf):
-                    return
-            if buf[i] != 0 or buf[i + 1] != 0 or buf[i + 2] != 0x01:
-                i += 1
+            # Find the start of the NAL unit
+            # NAL Units start with a 3-byte or 4 byte start code of 0x000001 or 0x00000001
+            # while buf[i:i+3] != b'\x00\x00\x01':
+            i = buf.find(b"\x00\x00\x01", i)
+            if i == -1:
+                return
+
+            # Jump past the start code
             i += 3
             nal_start = i
-            while (buf[i] != 0 or buf[i + 1] != 0 or buf[i + 2] != 0) and (
-                buf[i] != 0 or buf[i + 1] != 0 or buf[i + 2] != 0x01
-            ):
-                i += 1
-                # FIXME: the next line fails when reading a nal that ends
-                # exactly at the end of the data
-                if i + 3 >= len(buf):
-                    nal_end = len(buf)
-                    yield buf[nal_start:nal_end]
-                    return  # did not find nal end, stream ended first
-            nal_end = i
-            yield buf[nal_start:nal_end]
+
+            # Find the end of the NAL unit (end of buffer OR next start code)
+            i = buf.find(b"\x00\x00\x01", i)
+            if i == -1:
+                yield buf[nal_start : len(buf)]
+                return
+            elif buf[i - 1] == 0:
+                # 4-byte start code case, jump back one byte
+                yield buf[nal_start : i - 1]
+            else:
+                yield buf[nal_start:i]
 
     @classmethod
     def _packetize(cls, packages: Iterator[bytes]) -> List[bytes]:
@@ -278,6 +278,7 @@ class H264Encoder(Encoder):
             else:
                 packetized, package = cls._packetize_stap_a(package, packages_iterator)
                 packetized_packages.append(packetized)
+
 
         return packetized_packages
 
@@ -309,8 +310,9 @@ class H264Encoder(Encoder):
                     bitrate=self.target_bitrate,
                 )
                 print('Using libX')
+            self.codec_buffering = False
 
-
+        #print('Codec.bit_rate: {}'.format(self.codec.bit_rate))
         data_to_send = b""
         for package in self.codec.encode(frame):
             package_bytes = package.to_bytes()
@@ -325,6 +327,10 @@ class H264Encoder(Encoder):
                     self.buffer_pts = package.pts
             else:
                 data_to_send += package_bytes
+
+        f = open('Encoder_bytes.txt', 'a')
+        f.write('{:.4f},{}\n'.format(time.time(), len(data_to_send)))
+        f.close()
 
         if data_to_send:
             yield from self._split_bitstream(data_to_send)
@@ -362,13 +368,18 @@ class H264Encoder(Encoder):
         #elif self.height == 1080:
         #    frame = self.reformatter_high(frame, self.width, self.height, interpolation=av.video.reformatter.Interpolation.BICUBIC)
 
-        start = time.time()
-        frame = av.VideoFrame.reformat(frame, self.width, self.height)
-        packages = self._encode_frame(frame, force_keyframe)
+        
+        #frame = av.VideoFrame.reformat(frame, self.width, self.height)
+        start_time = time.time()
+        packages = self._encode_frame(frame, force_keyframe)  # Note that this function only produce iterator, does not do actual encoding
         timestamp = convert_timebase(frame.pts, frame.time_base, VIDEO_TIME_BASE)
-        packetized = self._packetize(packages)
-        end = time.time()
-        print("Encoding+TimebaseConv+Packetization took: {:.2f} ms".format((end-start)*1e3))
+        packetized = self._packetize(packages)  # Iterator is run in this function
+        end_time = time.time()
+        print("Encoding + Packetization took: {:.2f} ms".format((end_time-start_time)*1e3))
+        f = open('Encoded_frame.txt', 'a')
+        f.write('{:.4f},{}\n'.format(time.time(), self.frame_number))
+        f.close()
+        self.frame_number += 1
 
         return packetized, timestamp
 

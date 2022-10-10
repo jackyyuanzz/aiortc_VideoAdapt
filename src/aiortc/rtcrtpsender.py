@@ -239,7 +239,8 @@ class RTCRtpSender:
         elif isinstance(packet, RtcpPsfbPacket) and packet.fmt == RTCP_PSFB_APP:
             try:
                 bitrate, ssrcs = unpack_remb_fci(packet.fci)
-                bitrate_kbps = bitrate//(10**3)
+                bitrate_Mbps = bitrate/(10**6)
+                #print('Bitrate report from receiver: {:.3f} Mbps'.format(bitrate_Mbps))
                 if self._ssrc in ssrcs:
                     self.__log_debug(
                         "- receiver estimated maximum bitrate %d bps", bitrate
@@ -259,14 +260,14 @@ class RTCRtpSender:
                         # size = Resolutions[self.resolution_choice]
                         # self.__encoder.width = size[0]
                         # self.__encoder.height = size[1]
-                        if self.switch_count%40 == 0:
-                            self.resolution_choice = (self.resolution_choice+1)%3
-                            #self.resolution_choice = 2
-                            size = Resolutions[self.resolution_choice]
-                            print("******Switched to resolution with size: {} *******".format(size))
-                            self.__encoder.width = size[0]
-                            self.__encoder.height = size[1]
-                        self.switch_count += 1
+                        #if self.switch_count%40 == 0:
+                        #    self.resolution_choice = (self.resolution_choice+1)%3
+                        #    #self.resolution_choice = 2
+                        #    size = Resolutions[self.resolution_choice]
+                        #    print("******Switched to resolution with size: {} *******".format(size))
+                        #    self.__encoder.width = size[0]
+                        #    self.__encoder.height = size[1]
+                        #self.switch_count += 1
 
             except ValueError:
                 pass
@@ -324,6 +325,9 @@ class RTCRtpSender:
                 timestamp = uint32_add(timestamp_origin, timestamp)
 
                 for i, payload in enumerate(payloads):
+                    f = open('Payload_sent.txt', 'a')
+                    f.write('{:.4f},{}\n'.format(time.time(), len(payload)))
+                    f.close()
                     packet = RtpPacket(
                         payload_type=codec.payloadType,
                         sequence_number=sequence_number,

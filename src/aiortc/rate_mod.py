@@ -558,6 +558,10 @@ class RemoteBitrateEstimator_mod:
         # print(self.payload_record)
         # print(interarrival_time)
         interarrival_time = interarrival_time[inter_frame_ind==0] # discard intervals that are inter-frames
+        print(self.payload_record)
+        print(self.payload_record[frame_ind])
+        print(self.timestamp_record)
+        print("**********************************************************************")
 
         if len(self.payload_record) > 3:
             measured_bandwidth = np.sum(self.payload_record[1:][inter_frame_ind==0]) / (np.sum(interarrival_time) + 1e-12)

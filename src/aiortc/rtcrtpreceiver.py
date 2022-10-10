@@ -258,7 +258,7 @@ class RTCRtpReceiver:
         else:
             self.__jitter_buffer = JitterBuffer(capacity=128, is_video=True)
             self.__nack_generator = NackGenerator()
-            self.__remote_bitrate_estimator = RemoteBitrateEstimator()
+            # self.__remote_bitrate_estimator = RemoteBitrateEstimator()
             self.__remote_bitrate_estimator = RemoteBitrateEstimator_mod()
         self._track: Optional[RemoteStreamTrack] = None
         self.__rtcp_exited = asyncio.Event()
@@ -439,7 +439,7 @@ class RTCRtpReceiver:
                     ssrc=packet.ssrc, timestamp = packet.timestamp, arrival_time_measured = time.time()*1000
                 )
                 bitrate, ssrcs = self.__remote_bitrate_estimator.update(arrival_time_ms, arrival_time_measured = time.time()*1000)
-                print('Measured Bitrate: {}'.format(bitrate))
+                #print('Measured Bitrate: {}'.format(bitrate))
                 remb = True
                 if remb != None:
                     time_now = time.time()
