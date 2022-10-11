@@ -550,7 +550,9 @@ class RemoteBitrateEstimator_mod:
 
         #Returns the same integer index to packets that belong to the same frame (have same timestamp)
         # e.g. [0 0 0 1 1 1 1 2 2 2 2 3 3 3 3 4 4 4 4 5 5 5 5 6 6 6 6 7 7 7 7 7]
+        print(self.timestamp_record)
         _, frame_ind = np.unique(self.timestamp_record, return_inverse=True)
+        print(frame_ind)
         # Find intervals that span across different frames
         inter_frame_ind = frame_ind[1:] - frame_ind[0:-1]
         interarrival_time = self.arrival_time_record[1:] - self.arrival_time_record[0:-1]
@@ -558,8 +560,10 @@ class RemoteBitrateEstimator_mod:
         # print(self.payload_record)
         # print(interarrival_time)
         interarrival_time = interarrival_time[inter_frame_ind==0] # discard intervals that are inter-frames
+        print(inter_frame_ind)
+        print("----------------------------------------------------------------------")
         print(self.payload_record)
-        print(self.payload_record[frame_ind])
+        print(self.payload_record[1:][inter_frame_ind==0])
         print(self.timestamp_record)
         print("**********************************************************************")
 
